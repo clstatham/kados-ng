@@ -9,5 +9,10 @@ path = "src/main.rs"
 
 [dependencies]
 spin = "0.10.0"
-arch = { path = "../arch" }
+qemu-exit = "3.0"
+log = "0.4.27"
+thiserror = { version = "2.0.12", default-features = false }
 
+[target.'cfg(target_arch = "aarch64")'.dependencies]
+arm_pl011 = "0.1"
+aarch64-cpu = "10.0.0"

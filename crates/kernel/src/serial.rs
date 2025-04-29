@@ -1,9 +1,9 @@
-pub use arch::serial::*;
+pub use crate::arch::serial::*;
 
 use core::fmt::{self};
 
 pub fn _print(args: fmt::Arguments) {
-    arch::serial::write_fmt(args);
+    crate::arch::serial::write_fmt(args);
 }
 
 #[macro_export]

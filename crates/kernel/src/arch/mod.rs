@@ -1,5 +1,4 @@
-#![no_std]
-#![allow(clippy::missing_safety_doc)]
+pub mod driver;
 
 #[cfg(target_arch = "aarch64")]
 pub mod aarch64;

@@ -17,6 +17,12 @@ _start:
     ldr x0, =stack_top
     mov sp, x0
 
+    ldr x1, =ARCH_TIMER_COUNTER_FREQUENCY
+    mrs x2, CNTFRQ_EL0
+    cmp x2, xzr
+    b.eq hang
+    str w2, [x1]
+
     bl kernel_main
 hang:
     wfi

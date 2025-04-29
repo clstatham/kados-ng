@@ -1,40 +1,30 @@
 #![no_std]
 #![no_main]
-#![allow(internal_features)]
+#![allow(internal_features, clippy::missing_safety_doc)]
 #![feature(lang_items, test, custom_test_frameworks)]
 #![test_runner(crate::test_runner)]
 #![reexport_test_harness_main = "test_main"]
 
 use arch::logging::info;
 
+pub mod arch;
 #[macro_use]
 pub mod serial;
-
-#[lang = "eh_personality"]
-extern "C" fn eh_personality() {}
-
-#[cfg(not(test))]
-#[panic_handler]
-unsafe fn panic(info: &core::panic::PanicInfo) -> ! {
-    println!("Panic: {}", info);
-    arch::exit_qemu(1)
-}
-
-#[cfg(test)]
-#[panic_handler]
-fn panic(info: &core::panic::PanicInfo) -> ! {
-    println!("[failed]");
-    println!("Panic: {}", info);
-    arch::exit_qemu(1)
-}
+pub mod panicking;
 
 #[unsafe(no_mangle)]
 pub extern "C" fn kernel_main() -> ! {
-    arch::serial::init();
+    arch::serial::register();
+
+    unsafe {
+        arch::driver::init_drivers().expect("Failed to initialize drivers");
+    }
     arch::logging::init();
 
     #[cfg(test)]
     test_main();
+
+    info!("Kernel starting...");
 
     info!("Kernel started");
     arch::halt_loop()
@@ -57,7 +47,7 @@ where
 
 #[cfg(test)]
 pub fn test_runner(tests: &[&dyn Test]) {
-    info!("Running tests");
+    info!("Running tests...");
 
     for test in tests {
         test.run();
@@ -70,7 +60,7 @@ pub fn test_runner(tests: &[&dyn Test]) {
 mod tests {
     #[test_case]
     #[allow(clippy::eq_op)]
-    fn test_example() {
+    fn test_tests() {
         assert_eq!(1 + 1, 2);
     }
 }

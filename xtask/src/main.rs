@@ -64,17 +64,23 @@ fn main() {
         "-Zbuild-std-features=compiler-builtins-mem",
     ]);
 
+    let stderr = if args.mode == Mode::Test {
+        std::process::Stdio::piped()
+    } else {
+        std::process::Stdio::inherit()
+    };
+
     let output = Command::new("cargo")
         .args(cargo_args)
         .env("RUSTFLAGS", &rustflags)
-        .stderr(std::process::Stdio::piped())
+        .stderr(stderr)
         .spawn()
         .expect("Failed to execute cargo")
         .wait_with_output()
         .unwrap();
 
     if !output.status.success() {
-        eprintln!("Cargo build failed");
+        eprintln!("Cargo build failed: {}", output.status);
         std::process::exit(1);
     }
 

@@ -12,6 +12,10 @@ impl Log for Logger {
 
     fn log(&self, record: &Record) {
         let level = record.level();
+        let uptime = crate::arch::time::uptime();
+        let uptime_secs = uptime.as_secs();
+        let uptime_subsec_nanos = uptime.subsec_nanos();
+
         let level_str = match level {
             log::Level::Error => "ERR",
             log::Level::Warn => "WRN",
@@ -28,11 +32,13 @@ impl Log for Logger {
         };
         let reset = "\x1b[0m"; // Reset color
         crate::serial::write_fmt(format_args!(
-            "{}[{}]{} {}: {}\n",
+            "{}[{}]{} [{}.{:09}] [{}] {}\n",
             color,
             level_str,
             reset,
-            record.target(),
+            uptime_secs,
+            uptime_subsec_nanos,
+            record.target().split("::").last().unwrap_or(""),
             record.args(),
         ));
     }
@@ -41,4 +47,5 @@ impl Log for Logger {
 pub fn init() {
     log::set_logger(&Logger).expect("Failed to set logger");
     log::set_max_level(LevelFilter::Trace);
+    log::info!("Logger initialized");
 }
