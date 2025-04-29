@@ -8,6 +8,11 @@ pub mod time;
 
 global_asm!(include_str!("boot.S"));
 
+unsafe extern "C" {
+    /// The stack pointer for the kernel.
+    unsafe static mut __stack_top: u8;
+}
+
 pub fn exit_qemu(code: u32) -> ! {
     use qemu_exit::QEMUExit;
     qemu_exit::AArch64::new().exit(code)
@@ -20,7 +25,7 @@ pub fn halt_loop() -> ! {
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn arch_main(stack_end: u64) -> ! {
+pub extern "C" fn go_to_el1(stack_end: u64) -> ! {
     // enable timer counters for EL1
     CNTHCTL_EL2.write(CNTHCTL_EL2::EL1PCEN::SET + CNTHCTL_EL2::EL1PCTEN::SET);
     // no offset

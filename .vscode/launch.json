@@ -9,21 +9,7 @@
                 "platform select remote-gdb-server",
             ],
             "targetCreateCommands": [
-                "target create ${workspaceFolder}/target/aarch64-kados/debug/kernel",
-            ],
-            "processCreateCommands": [
-                "gdb-remote 127.0.0.1:1234"
-            ]
-        },
-        {
-            "type": "lldb",
-            "request": "launch",
-            "name": "Run QEMU (x86_64)",
-            "initCommands": [
-                "platform select remote-gdb-server",
-            ],
-            "targetCreateCommands": [
-                "target create ${workspaceFolder}/target/x86_64-kados/debug/kernel",
+                "target create ${workspaceFolder}/target/aarch64-unknown-none/debug/kernel",
             ],
             "processCreateCommands": [
                 "gdb-remote 127.0.0.1:1234"

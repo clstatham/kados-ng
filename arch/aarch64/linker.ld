@@ -3,22 +3,28 @@ ENTRY(_start)
 
 SECTIONS
 {
-    . = 0x40000000;
+    . = 0x40080000;
 
-    text ALIGN(4K) : {
-        *(.text .text.*)
+    text : {
+        *(.text._start)
+        *(.text*)
     }
 
-    .rodata ALIGN(4K) : {
+    .rodata : {
         *(.rodata .rodata.*)
     }
 
-    .data ALIGN(4K) : {
+    .data : {
         *(.data .data.*)
     }
 
-    .bss ALIGN(4K) : {
+    .bss (NOLOAD) : {
         *(.bss .bss.*)
         *(COMMON)
+
+        . = ALIGN(16);
+        __stack_start = .;
+        . = . + 0x4000;      /* 16 KiB stack */
+        __stack_top = .;
     }
 }

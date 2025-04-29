@@ -1,6 +1,7 @@
-use std::{path::PathBuf, process::Command};
+use std::{io::Write, path::PathBuf};
 
 use clap::Parser;
+use xshell::{Shell, cmd};
 
 #[derive(clap::ValueEnum, Clone, Copy, Debug, PartialEq, Eq)]
 enum Mode {
@@ -19,32 +20,47 @@ struct Args {
     kernel_path: Option<String>,
 }
 
-fn main() {
+const LINKER_SCRIPT: &str = "linker.ld";
+const KERNEL_ELF_NAME: &str = "kernel";
+const KERNEL_BIN_NAME: &str = "kernel.bin";
+const IMAGE_NAME: &str = "virtio.img";
+const MOUNT_DIR: &str = "/mnt/virtio";
+
+fn main() -> anyhow::Result<()> {
     let args = Args::parse();
+    let sh = Shell::new()?;
 
-    let arch = "aarch64";
-    let target = format!("{arch}-kados");
+    if args.mode == Mode::TestRunner {
+        let kernel_path = args.kernel_path.unwrap_or_else(|| {
+            panic!("Kernel path is required for test runner mode");
+        });
 
-    let base_dir = PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap()).join("..");
+        let kernel_path = PathBuf::from(kernel_path);
+        let qemu_args = vec![
+            "-M",
+            "virt",
+            "-cpu",
+            "cortex-a53",
+            "-m",
+            "8G",
+            "-serial",
+            "mon:stdio",
+            "-semihosting",
+            "-kernel",
+            kernel_path.to_str().unwrap(),
+        ];
+        cmd!(sh, "qemu-system-aarch64").args(qemu_args).run()?;
+        return Ok(());
+    }
 
-    let arch_dir = base_dir.join(PathBuf::from("arch")).join(arch);
-
-    let target_file = arch_dir.join(format!("{target}.json"));
-    let target_file_str = target_file.display().to_string();
-    let target_dir = PathBuf::from("target").join(target);
-
-    let linker_script = arch_dir.join("linker.ld");
-
-    let out_dir = target_dir.join("debug");
-    let kernel_elf_path = args
-        .kernel_path
-        .map(PathBuf::from)
-        .unwrap_or_else(|| out_dir.join("kernel"));
-
-    let rustflags = format!(
-        "-C linker=rust-lld -C link-arg=-T{}",
-        linker_script.display()
-    );
+    let build_target = "aarch64-unknown-none";
+    let target_dir = PathBuf::from(format!("target/{build_target}"));
+    let build_target_dir = target_dir.join("debug");
+    let image_path = build_target_dir.join(IMAGE_NAME);
+    let arch_dir = PathBuf::from("arch/aarch64");
+    let kernel_elf_path = build_target_dir.join(KERNEL_ELF_NAME);
+    let kernel_bin_path = build_target_dir.join(KERNEL_BIN_NAME);
+    let rustflags = format!("-C link-arg=-T{}", arch_dir.join(LINKER_SCRIPT).display());
 
     let mut cargo_args = vec![];
 
@@ -55,38 +71,81 @@ fn main() {
         cargo_args.push("build");
     }
 
-    cargo_args.extend([
-        "--target",
-        target_file_str.as_str(),
-        "-p",
-        "kernel",
-        "-Zbuild-std=core,compiler_builtins",
-        "-Zbuild-std-features=compiler-builtins-mem",
-    ]);
+    cargo_args.push("--target");
+    cargo_args.push(build_target);
 
-    let stderr = if args.mode == Mode::Test {
-        std::process::Stdio::piped()
-    } else {
-        std::process::Stdio::inherit()
-    };
-
-    let output = Command::new("cargo")
+    let cargo_output = cmd!(sh, "cargo")
         .args(cargo_args)
         .env("RUSTFLAGS", &rustflags)
-        .stderr(stderr)
-        .spawn()
-        .expect("Failed to execute cargo")
-        .wait_with_output()
-        .unwrap();
+        .read_stderr()?;
 
-    if !output.status.success() {
-        eprintln!("Cargo build failed: {}", output.status);
-        std::process::exit(1);
+    cmd!(sh, "llvm-objcopy")
+        .arg("-O")
+        .arg("binary")
+        .arg("--strip-all")
+        .arg(&kernel_elf_path)
+        .arg(&kernel_bin_path)
+        .run()?;
+
+    if !image_path.exists() {
+        cmd!(sh, "dd if=/dev/zero of={image_path} bs=1M count=1024").run()?;
+        cmd!(sh, "sudo parted {image_path} mklabel msdos").run()?;
+        cmd!(
+            sh,
+            "sudo parted -a none {image_path} mkpart primary fat32 1MiB 100%"
+        )
+        .run()?;
     }
 
+    cmd!(sh, "sudo losetup -Pf {image_path}").run()?;
+    let loop_dev = cmd!(sh, "losetup -j {image_path}").read()?;
+    let loop_dev = loop_dev.lines().next().unwrap().split(':').next().unwrap();
+    let part = format!("{loop_dev}p1");
+
+    cmd!(sh, "sudo mkfs.vfat {part}").run()?;
+    cmd!(sh, "sudo mkdir -p {MOUNT_DIR}").run()?;
+    cmd!(sh, "sudo mount {part} {MOUNT_DIR}").run()?;
+
+    let boot_txt = format!(
+        r#"
+    virtio scan
+    scsi scan
+    fatload virtio 0:1 0x40080000 {KERNEL_BIN_NAME}
+    go 0x40080000
+    "#
+    );
+    std::fs::File::create(format!("{}/boot.txt", target_dir.display()))?
+        .write_all(boot_txt.trim().as_bytes())?;
+
+    cmd!(sh, "mkimage")
+        .arg("-d")
+        .arg(format!("{}/boot.txt", target_dir.display()))
+        .arg("-A")
+        .arg("arm64")
+        .arg("-O")
+        .arg("linux")
+        .arg("-T")
+        .arg("script")
+        .arg("-C")
+        .arg("none")
+        .arg("-a")
+        .arg("0x40080000")
+        .arg("-e")
+        .arg("0x40080000")
+        .arg(format!("{}/boot.scr", target_dir.display()))
+        .run()?;
+
+    cmd!(sh, "sudo cp")
+        .arg(format!("{}/boot.scr", target_dir.display()))
+        .arg(kernel_bin_path)
+        .arg(MOUNT_DIR)
+        .run()?;
+
+    cmd!(sh, "sudo umount {MOUNT_DIR}").run()?;
+    cmd!(sh, "sudo losetup -d {loop_dev}").run()?;
+
     if args.mode == Mode::Test {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        let test_executable = stderr
+        let test_executable = cargo_output
             .split("/deps/")
             .last()
             .unwrap()
@@ -95,23 +154,19 @@ fn main() {
             .unwrap();
 
         let test_executable = target_dir.join("debug").join("deps").join(test_executable);
-        // kernel_elf_path = test_executable;
 
-        let status = Command::new("cargo")
+        cmd!(sh, "cargo")
             .args([
                 "xtask",
                 "test-runner",
                 "--kernel-path",
                 test_executable.to_str().unwrap(),
             ])
-            .status()
-            .unwrap();
-        if !status.success() {
-            eprintln!("Test runner failed");
-            std::process::exit(1);
-        }
-        return;
+            .run()?;
+        return Ok(());
     }
+
+    let disk_arg = format!("file={},if=virtio,format=raw", image_path.display());
 
     let mut qemu_args = vec![
         "-M",
@@ -119,43 +174,22 @@ fn main() {
         "-cpu",
         "cortex-a53",
         "-m",
-        "512M",
+        "8G",
         "-serial",
-        "stdio",
+        "mon:stdio",
         "-semihosting",
-        "-kernel",
-        kernel_elf_path.to_str().unwrap(),
-        // "-bios",
-        // "arch/aarch64/u-boot/u-boot.bin",
-        // "-drive",
-        // &disk_qemu_arg,
+        "-bios",
+        "arch/aarch64/u-boot/u-boot.bin",
+        "-drive",
+        &disk_arg,
     ];
 
-    match args.mode {
-        Mode::Run => {
-            // No additional arguments needed for run mode
-            run_qemu(&qemu_args);
-        }
-        Mode::Debug => {
-            qemu_args.push("-s");
-            qemu_args.push("-S");
-            // Add debug-specific arguments if needed
-            run_qemu(&qemu_args);
-        }
-        Mode::TestRunner => {
-            // Add test-specific arguments if needed
-            run_qemu(&qemu_args);
-        }
-        Mode::Test => {}
+    if args.mode == Mode::Debug {
+        qemu_args.push("-s");
+        qemu_args.push("-S");
     }
-}
 
-fn run_qemu(args: &[&str]) {
-    let status = Command::new("qemu-system-aarch64")
-        .args(args)
-        .status()
-        .expect("Failed to run QEMU");
-    if !status.success() {
-        eprintln!("QEMU exited with {status}");
-    }
+    cmd!(sh, "qemu-system-aarch64").args(qemu_args).run()?;
+
+    Ok(())
 }

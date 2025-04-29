@@ -1,28 +1,6 @@
-.section .bss
-.align 16
-stack_bottom:
-    .skip 4096 * 8
-stack_top:
-
-.section .bss
-.align 12
-.global early_page_table
-early_page_table:
-    .skip 4096
-
-.section .text
+.section .text._start
 .global _start
 _start:
-    // check to make sure we're the boot core
-    mrs x0, MPIDR_EL1
-    and x0, x0, #0b11
-    cmp x0, #0
-    b.ne .hang // if we're not the boot core, hang
-
-    // set up the initial stack
-    ldr x0, =stack_top
-    mov sp, x0
-
     // set up the timer registers
     ldr x1, =ARCH_TIMER_COUNTER_FREQUENCY
     mrs x2, CNTFRQ_EL0
@@ -39,15 +17,18 @@ _start:
     cmp x0, #0b1000
     b.ne .hang // if we're not in EL2, hang
 
-    // we're  in El2, so we call arch_main to switch to EL1
-    ldr x0, =stack_top
-    b arch_main
+    // we're  in El2, so we call go_to_el1 to switch to EL1
+    ldr x0, =__stack_top
+    b go_to_el1
 
     // arch_main somehow returned, so hang
     b .hang
 .in_el1:
     // we're in EL1, so we can just call kernel_main
+    ldr x0, =__stack_top
     bl kernel_main
+    // kernel_main somehow returned, so hang
 .hang:
     wfe
+    // hang forever
     b .hang
