@@ -1,5 +1,6 @@
 use core::arch::{asm, global_asm};
 
+pub mod logging;
 pub mod serial;
 
 global_asm!(include_str!("boot.S"));

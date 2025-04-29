@@ -2,83 +2,111 @@ use std::{path::PathBuf, process::Command};
 
 use clap::Parser;
 
+#[derive(clap::ValueEnum, Clone, Copy, Debug, PartialEq, Eq)]
+enum Mode {
+    Run,
+    Debug,
+    Test,
+    TestRunner,
+}
+
 #[derive(Parser)]
 #[clap(about = "Build the kernel and run it in QEMU")]
 struct Args {
-    #[clap(short, long, default_value_t = false)]
-    run: bool,
+    mode: Mode,
 
-    #[clap(short, long, default_value_t = false)]
-    debug: bool,
+    #[clap(long, value_parser)]
+    kernel_path: Option<String>,
 }
 
 fn main() {
     let args = Args::parse();
 
     let arch = "aarch64";
-    let target = "aarch64-kados";
+    let target = format!("{arch}-kados");
 
-    let arch_dir = PathBuf::from("arch").join(arch);
+    let base_dir = PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap()).join("..");
+
+    let arch_dir = base_dir.join(PathBuf::from("arch")).join(arch);
 
     let target_file = arch_dir.join(format!("{target}.json"));
+    let target_file_str = target_file.display().to_string();
     let target_dir = PathBuf::from("target").join(target);
 
     let linker_script = arch_dir.join("linker.ld");
+
+    let out_dir = target_dir.join("debug");
+    let kernel_elf_path = args
+        .kernel_path
+        .map(PathBuf::from)
+        .unwrap_or_else(|| out_dir.join("kernel"));
 
     let rustflags = format!(
         "-C linker=rust-lld -C link-arg=-T{}",
         linker_script.display()
     );
 
-    let status = Command::new("cargo")
-        .args([
-            "build",
-            "--target",
-            target_file.display().to_string().as_str(),
-            "-p",
-            "kernel",
-            "-Zbuild-std=core,compiler_builtins",
-            "-Zbuild-std-features=compiler-builtins-mem",
-        ])
-        .env("RUSTFLAGS", rustflags)
-        .status()
-        .expect("Failed to execute cargo");
+    let mut cargo_args = vec![];
 
-    if !status.success() {
+    if args.mode == Mode::Test {
+        cargo_args.push("test");
+        cargo_args.push("--no-run");
+    } else {
+        cargo_args.push("build");
+    }
+
+    cargo_args.extend([
+        "--target",
+        target_file_str.as_str(),
+        "-p",
+        "kernel",
+        "-Zbuild-std=core,compiler_builtins",
+        "-Zbuild-std-features=compiler-builtins-mem",
+    ]);
+
+    let output = Command::new("cargo")
+        .args(cargo_args)
+        .env("RUSTFLAGS", &rustflags)
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .expect("Failed to execute cargo")
+        .wait_with_output()
+        .unwrap();
+
+    if !output.status.success() {
+        eprintln!("Cargo build failed");
         std::process::exit(1);
     }
 
-    let out_dir = target_dir.join("debug");
-    let disk_dir = out_dir.join("disk");
-    let kernel_elf_path = out_dir.join("kernel");
-    // let kernel_img_path = disk_dir.join("kernel8.img");
-    // let boot_cmd_path = out_dir.join("boot.cmd");
-    // let boot_scr_path = disk_dir.join("boot.scr");
+    if args.mode == Mode::Test {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let test_executable = stderr
+            .split("/deps/")
+            .last()
+            .unwrap()
+            .trim()
+            .strip_suffix(')')
+            .unwrap();
 
-    // let mkimage_args = [
-    //     "-A",
-    //     "arm64",
-    //     "-O",
-    //     "linux",
-    //     "-T",
-    //     "script",
-    //     "-C",
-    //     "none",
-    //     "-a",
-    //     "0x0",
-    //     "-e",
-    //     "0x0",
-    //     "-n",
-    //     "kados boot script",
-    //     "-d",
-    //     boot_cmd_path.to_str().unwrap(),
-    //     boot_scr_path.to_str().unwrap(),
-    // ];
+        let test_executable = target_dir.join("debug").join("deps").join(test_executable);
+        // kernel_elf_path = test_executable;
 
-    // let disk_qemu_arg = format!(
-    //     "if=virtio,file=fat:rw:{},format=raw,id=hd0",
-    //     disk_dir.display()
-    // );
+        let status = Command::new("cargo")
+            .args([
+                "xtask",
+                "test-runner",
+                "--kernel-path",
+                test_executable.to_str().unwrap(),
+            ])
+            .status()
+            .unwrap();
+        if !status.success() {
+            eprintln!("Test runner failed");
+            std::process::exit(1);
+        }
+        return;
+    }
+
     let mut qemu_args = vec![
         "-M",
         "virt",
@@ -96,48 +124,32 @@ fn main() {
         // "-drive",
         // &disk_qemu_arg,
     ];
-    if args.debug {
-        qemu_args.push("-s");
-        qemu_args.push("-S");
-        qemu_args.push("-d");
-        qemu_args.push("int");
+
+    match args.mode {
+        Mode::Run => {
+            // No additional arguments needed for run mode
+            run_qemu(&qemu_args);
+        }
+        Mode::Debug => {
+            qemu_args.push("-s");
+            qemu_args.push("-S");
+            // Add debug-specific arguments if needed
+            run_qemu(&qemu_args);
+        }
+        Mode::TestRunner => {
+            // Add test-specific arguments if needed
+            run_qemu(&qemu_args);
+        }
+        Mode::Test => {}
     }
+}
 
-    // Create the disk directory if it doesn't exist
-    std::fs::create_dir_all(&disk_dir).expect("Failed to create disk directory");
-    // // Copy the kernel binary to the disk directory and strip the ELF header
-    // let status = Command::new("llvm-objcopy")
-    //     .args([
-    //         "--output-target=binary",
-    //         kernel_elf_path.to_str().unwrap(),
-    //         kernel_img_path.to_str().unwrap(),
-    //     ])
-    //     .status()
-    //     .expect("Failed to copy kernel binary");
-    // if !status.success() {
-    //     eprintln!("Failed to copy kernel binary");
-    //     std::process::exit(1);
-    // }
-
-    // // Create the boot.cmd file
-    // std::fs::write(&boot_cmd_path, include_str!("boot.cmd"))
-    //     .expect("Failed to write boot.cmd");
-    // // Create the boot.scr file
-    // let status = Command::new("mkimage")
-    //     .args(mkimage_args)
-    //     .status()
-    //     .expect("Failed to create boot.scr");
-    // if !status.success() {
-    //     eprintln!("Failed to create boot.scr");
-    //     std::process::exit(1);
-    // }
-
-    if args.run {
-        // Run the kernel using QEMU
-        let status = Command::new("qemu-system-aarch64")
-            .args(qemu_args)
-            .status()
-            .expect("Failed to run QEMU: Command failed");
+fn run_qemu(args: &[&str]) {
+    let status = Command::new("qemu-system-aarch64")
+        .args(args)
+        .status()
+        .expect("Failed to run QEMU");
+    if !status.success() {
         eprintln!("QEMU exited with {status}");
     }
 }
