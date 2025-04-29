@@ -1,0 +1,17 @@
+[package]
+name = "kernel"
+version = "0.1.0"
+edition = "2024"
+
+[[bin]]
+name = "kernel"
+path = "src/main.rs"
+test = false
+bench = false
+
+[dependencies]
+spin = "0.10.0"
+arch = { path = "../arch" }
+
+[package.metadata]
+boot-targets = ["x86_64", "aarch64"]
