@@ -1,10 +1,13 @@
 use core::{
+    fmt::Display,
     num::{NonZeroU32, NonZeroU64, NonZeroU128},
     ops::{Add, Div},
     time::Duration,
 };
 
 use aarch64_cpu::{asm::barrier, registers::*};
+use chrono_light::prelude::*;
+use spin::Once;
 
 const NANOSEC_PER_SEC: NonZeroU64 = NonZeroU64::new(1_000_000_000).unwrap();
 
@@ -15,15 +18,49 @@ fn arch_timer_counter_frequency() -> NonZeroU32 {
     unsafe { core::ptr::read_volatile(&ARCH_TIMER_COUNTER_FREQUENCY) }
 }
 
-pub unsafe fn init() {
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub struct Instant(DateTime);
+
+impl Instant {
+    pub fn now() -> Self {
+        let calendar = Calendar::create();
+        Instant(calendar.from_unixtime(
+            uptime().as_millis() as u64 + calendar.to_unixtime(&DATE_AT_BOOT.get().unwrap().0),
+        ))
+    }
+}
+
+impl Display for Instant {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(
+            f,
+            "{}/{}/{} {}:{}:{}.{:03}",
+            self.0.year,
+            self.0.month,
+            self.0.day,
+            self.0.hour,
+            self.0.minute,
+            self.0.second,
+            self.0.ms
+        )
+    }
+}
+
+static DATE_AT_BOOT: Once<Instant> = Once::new();
+
+pub unsafe fn init(date_at_boot: Duration) {
     unsafe {
         core::arch::asm!(
-            r#"ldr x1, =ARCH_TIMER_COUNTER_FREQUENCY
+            r#"
+            ldr x1, =ARCH_TIMER_COUNTER_FREQUENCY
             mrs x2, CNTFRQ_EL0
             str w2, [x1]
             "#
         );
     }
+
+    DATE_AT_BOOT
+        .call_once(|| Instant(Calendar::create().from_unixtime(date_at_boot.as_millis() as u64)));
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]

@@ -8,6 +8,8 @@ name = "kernel"
 path = "src/main.rs"
 
 [dependencies]
+buddy_system_allocator = "0.11.0"
+chrono-light = { version = "0.1.5", default-features = false }
 derive_more = {version = "2.0.1", default-features = false, features = ["full"]}
 limine = "0.4.0"
 log = "0.4.27"
