@@ -24,7 +24,6 @@ const LINKER_SCRIPT: &str = "linker.ld";
 const KERNEL_ELF_NAME: &str = "kernel";
 const KERNEL_BIN_NAME: &str = "kernel.bin";
 const IMAGE_NAME: &str = "virtio.img";
-const MOUNT_DIR: &str = "/mnt/virtio";
 
 fn main() -> anyhow::Result<()> {
     let args = Args::parse();
@@ -69,8 +68,7 @@ fn main() -> anyhow::Result<()> {
             .strip_suffix(')')
             .unwrap()
             .to_string();
-        kernel_elf_path = target_dir
-            .join("debug")
+        kernel_elf_path = build_target_dir
             .join("deps")
             .join(new_kernel_elf)
             .display()
@@ -86,23 +84,9 @@ fn main() -> anyhow::Result<()> {
         .run()?;
 
     if !image_path.exists() {
-        cmd!(sh, "dd if=/dev/zero of={image_path} bs=1M count=1024").run()?;
-        cmd!(sh, "sudo parted {image_path} mklabel msdos").run()?;
-        cmd!(
-            sh,
-            "sudo parted -a none {image_path} mkpart primary fat32 1MiB 100%"
-        )
-        .run()?;
+        cmd!(sh, "truncate -s 64M {image_path}").run()?;
+        cmd!(sh, "mformat -i {image_path} -h 64 -t 32 -s 32 -F ::").run()?;
     }
-
-    cmd!(sh, "sudo losetup -Pf {image_path}").run()?;
-    let loop_dev = cmd!(sh, "losetup -j {image_path}").read()?;
-    let loop_dev = loop_dev.lines().next().unwrap().split(':').next().unwrap();
-    let part = format!("{loop_dev}p1");
-
-    cmd!(sh, "sudo mkfs.vfat {part}").run()?;
-    cmd!(sh, "sudo mkdir -p {MOUNT_DIR}").run()?;
-    cmd!(sh, "sudo mount {part} {MOUNT_DIR}").run()?;
 
     let boot_txt = format!(
         r#"
@@ -133,14 +117,16 @@ fn main() -> anyhow::Result<()> {
         .arg(format!("{}/boot.scr", target_dir.display()))
         .run()?;
 
-    cmd!(sh, "sudo cp")
-        .arg(format!("{}/boot.scr", target_dir.display()))
-        .arg(kernel_bin_path)
-        .arg(MOUNT_DIR)
-        .run()?;
-
-    cmd!(sh, "sudo umount {MOUNT_DIR}").run()?;
-    cmd!(sh, "sudo losetup -d {loop_dev}").run()?;
+    cmd!(
+        sh,
+        "mcopy -Do -i {image_path} -s {kernel_bin_path} ::{KERNEL_BIN_NAME}"
+    )
+    .run()?;
+    cmd!(
+        sh,
+        "mcopy -Do -i {image_path} -s {target_dir}/boot.scr ::boot.scr"
+    )
+    .run()?;
 
     if args.mode == Mode::Test {
         let test_executable = cargo_output
