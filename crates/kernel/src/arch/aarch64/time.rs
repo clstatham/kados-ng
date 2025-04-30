@@ -15,6 +15,17 @@ fn arch_timer_counter_frequency() -> NonZeroU32 {
     unsafe { core::ptr::read_volatile(&ARCH_TIMER_COUNTER_FREQUENCY) }
 }
 
+pub unsafe fn init() {
+    unsafe {
+        core::arch::asm!(
+            r#"ldr x1, =ARCH_TIMER_COUNTER_FREQUENCY
+            mrs x2, CNTFRQ_EL0
+            str w2, [x1]
+            "#
+        );
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]
 pub struct GenericTimerValue {
     pub value: u64,

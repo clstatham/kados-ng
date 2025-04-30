@@ -5,6 +5,11 @@
 #![test_runner(crate::testing::test_runner)]
 #![reexport_test_harness_main = "test_main"]
 
+use limine::request::{
+    DateAtBootRequest, EntryPointRequest, ExecutableFileRequest, HhdmRequest, MemoryMapRequest,
+    StackSizeRequest,
+};
+
 pub mod arch;
 pub mod logging;
 #[macro_use]
@@ -13,8 +18,19 @@ pub mod panicking;
 #[cfg(test)]
 pub mod testing;
 
+static HHDM: HhdmRequest = HhdmRequest::new();
+static ENTRY_POINT: EntryPointRequest = EntryPointRequest::new().with_entry_point(kernel_main);
+static _STACK: StackSizeRequest = StackSizeRequest::new().with_size(0x20000);
+static BOOT_TIME: DateAtBootRequest = DateAtBootRequest::new();
+static MEM_MAP: MemoryMapRequest = MemoryMapRequest::new();
+static KRENEL_FILE: ExecutableFileRequest = ExecutableFileRequest::new();
+
 #[unsafe(no_mangle)]
 pub extern "C" fn kernel_main() -> ! {
+    unsafe {
+        arch::time::init();
+    }
+
     arch::driver::register_driver(&serial::UartDriver, "PL011 UART")
         .expect("Failed to register UART driver");
 

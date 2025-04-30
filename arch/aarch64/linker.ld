@@ -1,30 +1,55 @@
 OUTPUT_ARCH(aarch64)
-ENTRY(_start)
+ENTRY(kernel_main)
+
+PHDRS
+{
+    limine_requests PT_LOAD;
+    text PT_LOAD;
+    rodata PT_LOAD;
+    data PT_LOAD;
+}
+
+
+KERNEL_OFFSET = 0xffffffff80000000;
 
 SECTIONS
 {
-    . = 0x40080000;
+    . = KERNEL_OFFSET;
+    . += SIZEOF_HEADERS;
+
+    .limine_requests : {
+        KEEP(*(.limine_requests_start))
+        KEEP(*(.limine_requests))
+        KEEP(*(.limine_requests_end))
+    } :limine_requests
+
+    . = ALIGN(CONSTANT(MAXPAGESIZE));
 
     text : {
-        *(.text._start)
-        *(.text*)
+        *(.text .text.*)
     }
+
+    . = ALIGN(CONSTANT(MAXPAGESIZE));
 
     .rodata : {
         *(.rodata .rodata.*)
     }
 
+    . = ALIGN(CONSTANT(MAXPAGESIZE));
+
     .data : {
         *(.data .data.*)
     }
 
+    . = ALIGN(CONSTANT(MAXPAGESIZE));
+
     .bss (NOLOAD) : {
         *(.bss .bss.*)
         *(COMMON)
+    }
 
-        . = ALIGN(16);
-        __stack_start = .;
-        . = . + 0x4000;      /* 16 KiB stack */
-        __stack_top = .;
+    /DISCARD/ : {
+        *(.eh_frame*)
+        *(.note .note.*)
     }
 }
