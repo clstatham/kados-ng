@@ -3,21 +3,37 @@ use std::{io::Write, path::PathBuf};
 use clap::Parser;
 use xshell::{Shell, cmd};
 
-#[derive(clap::ValueEnum, Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(clap::Subcommand, Clone, Debug, PartialEq, Eq)]
 enum Mode {
+    /// Build the kernel and run it in QEMU
     Run,
+    /// Build the kernel and run it in QEMU with debug options (gdbserver)
     Debug,
+    /// Build the kernel and run the tests in QEMU
     Test,
-    TestRunner,
+    /// Internal mode used by the test runner
+    #[clap(hide = true)]
+    TestRunner {
+        /// Path to the kernel ELF file
+        kernel_path: String,
+    },
 }
 
 #[derive(Parser)]
 #[clap(about = "Build the kernel and run it in QEMU")]
 struct Args {
+    /// Mode of operation
+    #[command(subcommand)]
     mode: Mode,
+}
 
-    #[clap(long, value_parser)]
-    kernel_path: Option<String>,
+impl Args {
+    fn kernel_path(&self) -> Option<String> {
+        match &self.mode {
+            Mode::TestRunner { kernel_path } => Some(kernel_path.clone()),
+            _ => None,
+        }
+    }
 }
 
 const LINKER_SCRIPT: &str = "linker.ld";
@@ -35,7 +51,7 @@ fn main() -> anyhow::Result<()> {
     let image_path = build_target_dir.join(IMAGE_NAME);
     let arch_dir = PathBuf::from("arch/aarch64");
     let mut kernel_elf_path = args
-        .kernel_path
+        .kernel_path()
         .unwrap_or_else(|| format!("{}/{}", build_target_dir.display(), KERNEL_ELF_NAME));
     let kernel_bin_path = build_target_dir.join(KERNEL_BIN_NAME);
     let rustflags = format!("-C link-arg=-T{}", arch_dir.join(LINKER_SCRIPT).display());
@@ -91,7 +107,6 @@ fn main() -> anyhow::Result<()> {
     let boot_txt = format!(
         r#"
     virtio scan
-    scsi scan
     fatload virtio 0:1 0x40080000 {KERNEL_BIN_NAME}
     go 0x40080000
     "#
@@ -140,12 +155,7 @@ fn main() -> anyhow::Result<()> {
         let test_executable = target_dir.join("debug").join("deps").join(test_executable);
 
         cmd!(sh, "cargo")
-            .args([
-                "xtask",
-                "test-runner",
-                "--kernel-path",
-                test_executable.to_str().unwrap(),
-            ])
+            .args(["xtask", "test-runner", test_executable.to_str().unwrap()])
             .run()?;
         return Ok(());
     }
