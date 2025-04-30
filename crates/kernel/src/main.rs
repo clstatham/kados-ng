@@ -19,6 +19,7 @@ pub extern "C" fn kernel_main() -> ! {
     unsafe {
         arch::driver::init_drivers().expect("Failed to initialize drivers");
     }
+
     arch::logging::init();
 
     #[cfg(test)]

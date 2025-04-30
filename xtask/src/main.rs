@@ -30,35 +30,14 @@ fn main() -> anyhow::Result<()> {
     let args = Args::parse();
     let sh = Shell::new()?;
 
-    if args.mode == Mode::TestRunner {
-        let kernel_path = args.kernel_path.unwrap_or_else(|| {
-            panic!("Kernel path is required for test runner mode");
-        });
-
-        let kernel_path = PathBuf::from(kernel_path);
-        let qemu_args = vec![
-            "-M",
-            "virt",
-            "-cpu",
-            "cortex-a53",
-            "-m",
-            "8G",
-            "-serial",
-            "mon:stdio",
-            "-semihosting",
-            "-kernel",
-            kernel_path.to_str().unwrap(),
-        ];
-        cmd!(sh, "qemu-system-aarch64").args(qemu_args).run()?;
-        return Ok(());
-    }
-
     let build_target = "aarch64-unknown-none";
     let target_dir = PathBuf::from(format!("target/{build_target}"));
     let build_target_dir = target_dir.join("debug");
     let image_path = build_target_dir.join(IMAGE_NAME);
     let arch_dir = PathBuf::from("arch/aarch64");
-    let kernel_elf_path = build_target_dir.join(KERNEL_ELF_NAME);
+    let mut kernel_elf_path = args
+        .kernel_path
+        .unwrap_or_else(|| format!("{}/{}", build_target_dir.display(), KERNEL_ELF_NAME));
     let kernel_bin_path = build_target_dir.join(KERNEL_BIN_NAME);
     let rustflags = format!("-C link-arg=-T{}", arch_dir.join(LINKER_SCRIPT).display());
 
@@ -73,11 +52,30 @@ fn main() -> anyhow::Result<()> {
 
     cargo_args.push("--target");
     cargo_args.push(build_target);
+    cargo_args.push("-p");
+    cargo_args.push("kernel");
 
     let cargo_output = cmd!(sh, "cargo")
         .args(cargo_args)
         .env("RUSTFLAGS", &rustflags)
         .read_stderr()?;
+
+    if args.mode == Mode::Test {
+        let new_kernel_elf = cargo_output
+            .split("/deps/")
+            .last()
+            .unwrap()
+            .trim()
+            .strip_suffix(')')
+            .unwrap()
+            .to_string();
+        kernel_elf_path = target_dir
+            .join("debug")
+            .join("deps")
+            .join(new_kernel_elf)
+            .display()
+            .to_string();
+    }
 
     cmd!(sh, "llvm-objcopy")
         .arg("-O")

@@ -17,11 +17,11 @@ _start:
     cmp x0, #0b1000
     b.ne .hang // if we're not in EL2, hang
 
-    // we're  in El2, so we call go_to_el1 to switch to EL1
+    // we're in El2, so we call go_to_el1 to switch to EL1
     ldr x0, =__stack_top
     b go_to_el1
 
-    // arch_main somehow returned, so hang
+    // go_to_el1 somehow returned, so hang
     b .hang
 .in_el1:
     // we're in EL1, so we can just call kernel_main
