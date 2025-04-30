@@ -36,7 +36,7 @@ impl Args {
     }
 }
 
-const LINKER_SCRIPT: &str = "linker.ld";
+const LINKER_SCRIPT_NAME: &str = "linker.ld";
 const KERNEL_ELF_NAME: &str = "kernel";
 const KERNEL_BIN_NAME: &str = "kernel.bin";
 const IMAGE_NAME: &str = "virtio.img";
@@ -54,7 +54,10 @@ fn main() -> anyhow::Result<()> {
         .kernel_path()
         .unwrap_or_else(|| format!("{}/{}", build_target_dir.display(), KERNEL_ELF_NAME));
     let kernel_bin_path = build_target_dir.join(KERNEL_BIN_NAME);
-    let rustflags = format!("-C link-arg=-T{}", arch_dir.join(LINKER_SCRIPT).display());
+    let rustflags = format!(
+        "-C link-arg=-T{}",
+        arch_dir.join(LINKER_SCRIPT_NAME).display()
+    );
 
     let mut cargo_args = vec![];
 
@@ -70,13 +73,27 @@ fn main() -> anyhow::Result<()> {
     cargo_args.push("-p");
     cargo_args.push("kernel");
 
+    // let mut cargo_stdout = String::new();
+
     let cargo_output = cmd!(sh, "cargo")
         .args(cargo_args)
         .env("RUSTFLAGS", &rustflags)
-        .read_stderr()?;
+        .ignore_status()
+        .output()?;
+
+    let cargo_stdout = String::from_utf8_lossy(&cargo_output.stdout);
+    let cargo_stderr = String::from_utf8_lossy(&cargo_output.stderr);
+
+    println!("{cargo_stdout}");
+
+    if !cargo_output.status.success() {
+        eprintln!("{cargo_stderr}");
+        eprintln!("Cargo command failed: {:?}", cargo_output.status);
+        std::process::exit(1);
+    }
 
     if args.mode == Mode::Test {
-        let new_kernel_elf = cargo_output
+        let new_kernel_elf = cargo_stderr
             .split("/deps/")
             .last()
             .unwrap()
@@ -144,7 +161,7 @@ fn main() -> anyhow::Result<()> {
     .run()?;
 
     if args.mode == Mode::Test {
-        let test_executable = cargo_output
+        let test_executable = cargo_stderr
             .split("/deps/")
             .last()
             .unwrap()

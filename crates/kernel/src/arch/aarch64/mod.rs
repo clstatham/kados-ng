@@ -2,7 +2,7 @@ use core::arch::{asm, global_asm};
 
 use aarch64_cpu::{asm, registers::*};
 
-pub mod logging;
+pub mod random;
 pub mod serial;
 pub mod time;
 

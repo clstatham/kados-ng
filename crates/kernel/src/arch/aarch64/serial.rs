@@ -3,7 +3,7 @@ use core::fmt::{self, Write};
 use arm_pl011::Pl011Uart;
 use spin::{Once, mutex::SpinMutex};
 
-use crate::arch::driver::{Driver, register_driver};
+use crate::arch::driver::Driver;
 
 const PL011_BASE: *mut u8 = 0x0900_0000 as *mut u8; // Base address of PL011 UART
 
@@ -39,8 +39,4 @@ impl Driver for UartDriver {
         UART.call_once(|| SpinMutex::new(Uart(uart)));
         Ok(())
     }
-}
-
-pub fn register() {
-    register_driver(&UartDriver, "PLO11 UART", None).expect("Failed to register UART driver");
 }

@@ -5,9 +5,8 @@
 #![test_runner(crate::testing::test_runner)]
 #![reexport_test_harness_main = "test_main"]
 
-use arch::logging::info;
-
 pub mod arch;
+pub mod logging;
 #[macro_use]
 pub mod serial;
 pub mod panicking;
@@ -16,20 +15,21 @@ pub mod testing;
 
 #[unsafe(no_mangle)]
 pub extern "C" fn kernel_main() -> ! {
-    arch::serial::register();
+    arch::driver::register_driver(&serial::UartDriver, "PL011 UART")
+        .expect("Failed to register UART driver");
 
     unsafe {
         arch::driver::init_drivers().expect("Failed to initialize drivers");
     }
 
-    arch::logging::init();
+    logging::init();
 
     #[cfg(test)]
     test_main();
 
-    info!("Kernel starting...");
+    log::info!("Kernel starting...");
 
-    info!("Kernel started");
+    log::info!("Kernel started");
     arch::halt_loop()
 }
 

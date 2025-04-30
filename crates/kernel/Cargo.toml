@@ -1,18 +1,22 @@
 [package]
+edition = "2024"
 name = "kernel"
 version = "0.1.0"
-edition = "2024"
 
 [[bin]]
 name = "kernel"
 path = "src/main.rs"
 
 [dependencies]
-spin = "0.10.0"
-qemu-exit = "3.0"
+derive_more = {version = "2.0.1", default-features = false, features = ["full"]}
 log = "0.4.27"
-thiserror = { version = "2.0.12", default-features = false }
+qemu-exit = "3.0"
+rand = {version = "0.9.1", default-features = false, features = []}
+rand_chacha = {version = "0.9.0", default-features = false}
+spin = "0.10.0"
+thiserror = {version = "2.0.12", default-features = false}
+uuid = {version = "1.16.0", default-features = false, features = ["v8"]}
 
 [target.'cfg(target_arch = "aarch64")'.dependencies]
-arm_pl011 = "0.1"
 aarch64-cpu = "10.0.0"
+arm_pl011 = "0.1"

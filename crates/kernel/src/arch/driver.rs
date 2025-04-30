@@ -1,11 +1,18 @@
 use core::sync::atomic::AtomicUsize;
 
+use derive_more::Deref;
 use spin::mutex::SpinMutex;
 use thiserror::Error;
+use uuid::Uuid;
 
 use crate::println;
 
+use super::random::getrandom;
+
 pub const MAX_DRIVERS: usize = 32;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Deref)]
+pub struct DriverId(Uuid);
 
 static DRIVER_MANAGER: DriverManager = DriverManager::new();
 
@@ -16,17 +23,8 @@ pub fn driver_manager() -> &'static DriverManager {
 pub fn register_driver<T: Driver>(
     driver: &'static T,
     name: &'static str,
-    post_init: Option<DriverInitFn>,
 ) -> Result<(), &'static str> {
-    let descriptor = DriverDescriptor::new(driver, name, post_init);
-    driver_manager().register_driver(descriptor)
-}
-
-pub fn register_drivers(drivers: &[DriverDescriptor]) -> Result<(), &'static str> {
-    for descriptor in drivers {
-        driver_manager().register_driver(*descriptor)?;
-    }
-    Ok(())
+    driver_manager().register_driver(driver, name)
 }
 
 pub unsafe fn init_drivers() -> Result<(), DriverError> {
@@ -46,28 +44,14 @@ pub trait Driver: Sync {
     fn name(&self) -> &'static str;
 }
 
-pub type DriverInitFn = unsafe fn() -> Result<(), &'static str>;
-
 #[derive(Clone, Copy)]
 pub struct DriverDescriptor {
     driver: &'static dyn Driver,
+    id: DriverId,
     instance_name: &'static str,
-    post_init: Option<DriverInitFn>,
 }
 
 impl DriverDescriptor {
-    pub const fn new(
-        driver: &'static dyn Driver,
-        instance_name: &'static str,
-        post_init: Option<DriverInitFn>,
-    ) -> Self {
-        Self {
-            driver,
-            instance_name,
-            post_init,
-        }
-    }
-
     pub unsafe fn init(&self) -> Result<(), DriverError> {
         unsafe {
             if let Err(msg) = self.driver.init() {
@@ -76,17 +60,6 @@ impl DriverDescriptor {
                     instance_name: self.instance_name,
                     message: msg,
                 });
-            }
-        }
-        if let Some(post_init) = self.post_init {
-            unsafe {
-                if let Err(msg) = post_init() {
-                    return Err(DriverError {
-                        driver_name: self.driver.name(),
-                        instance_name: self.instance_name,
-                        message: msg,
-                    });
-                }
             }
         }
         Ok(())
@@ -118,11 +91,22 @@ impl DriverManager {
         self.count.load(core::sync::atomic::Ordering::SeqCst)
     }
 
-    pub fn register_driver(&self, driver: DriverDescriptor) -> Result<(), &'static str> {
+    pub fn register_driver(
+        &self,
+        driver: &'static dyn Driver,
+        instance_name: &'static str,
+    ) -> Result<(), &'static str> {
         let count = self.driver_count();
         if count >= MAX_DRIVERS {
             return Err("DriverManager is full");
         }
+        let random_bytes = getrandom();
+        let id = DriverId(uuid::Builder::from_random_bytes(random_bytes).into_uuid());
+        let driver = DriverDescriptor {
+            driver,
+            id,
+            instance_name,
+        };
         self.drivers.lock()[count] = Some(driver);
         self.count
             .fetch_add(1, core::sync::atomic::Ordering::SeqCst);
@@ -135,8 +119,9 @@ impl DriverManager {
         for i in 0..count {
             if let Some(driver) = self.drivers.lock()[i] {
                 println!(
-                    "    {}: {}/{}",
+                    "    {:>2} ({}): {}/{}",
                     i,
+                    driver.id.0,
                     driver.driver_name(),
                     driver.instance_name()
                 );
@@ -152,12 +137,15 @@ impl DriverManager {
                     driver.init()?;
                 }
                 println!(
-                    "Driver \"{}/{}\" initialized",
+                    "Driver {} ({}/{}) initialized",
+                    driver.id.0,
                     driver.driver_name(),
                     driver.instance_name()
                 );
             }
         }
+        println!("All drivers initialized");
+        self.enumerate();
         Ok(())
     }
 }
