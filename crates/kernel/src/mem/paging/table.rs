@@ -104,11 +104,11 @@ impl PageTable {
 pub struct PageTableEntry(usize);
 
 impl PageTableEntry {
-    pub fn new(address: usize, flags: usize) -> Self {
+    pub fn new(address: usize, flags: PageFlags) -> Self {
         Self(
             (((address >> Arch::PAGE_SHIFT) & Arch::PAGE_ENTRY_ADDR_MASK)
                 << Arch::PAGE_ENTRY_ADDR_SHIFT)
-                | flags,
+                | flags.raw(),
         )
     }
 
@@ -154,20 +154,18 @@ pub struct PageFlags(usize);
 impl PageFlags {
     pub fn new() -> Self {
         Self(
-            Arch::PAGE_FLAG_PAGE_DEFAULTS
-                // | Arch::PAGE_FLAG_READWRITE
-                | Arch::PAGE_FLAG_READONLY
-                | Arch::PAGE_FLAG_NON_EXECUTABLE
-                // | Arch::PAGE_FLAG_EXECUTABLE
-                | Arch::PAGE_FLAG_NON_GLOBAL,
+            Arch::PAGE_FLAG_PAGE_DEFAULTS, // | Arch::PAGE_FLAG_READWRITE
+                                           // | Arch::PAGE_FLAG_READONLY
+                                           // | Arch::PAGE_FLAG_NON_EXECUTABLE
+                                           // // | Arch::PAGE_FLAG_EXECUTABLE
+                                           // | Arch::PAGE_FLAG_NON_GLOBAL,
         )
     }
 
     pub fn new_table() -> Self {
         Self(
-            Arch::PAGE_FLAG_TABLE_DEFAULTS
-                | Arch::PAGE_FLAG_NON_EXECUTABLE
-                | Arch::PAGE_FLAG_NON_GLOBAL,
+            Arch::PAGE_FLAG_TABLE_DEFAULTS, // | Arch::PAGE_FLAG_NON_EXECUTABLE
+                                            // | Arch::PAGE_FLAG_NON_GLOBAL,
         )
     }
 

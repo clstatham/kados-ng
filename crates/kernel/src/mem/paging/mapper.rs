@@ -31,22 +31,6 @@ impl PageFlush {
     }
 }
 
-pub struct PageFlushAll;
-
-impl PageFlushAll {
-    pub unsafe fn ignore(self) {
-        core::mem::forget(self);
-    }
-}
-
-impl Drop for PageFlushAll {
-    fn drop(&mut self) {
-        unsafe {
-            Arch::invalidate_all();
-        }
-    }
-}
-
 pub struct Mapper<A: FrameAllocator> {
     table_addr: PhysAddr,
     allocator: A,
@@ -83,6 +67,12 @@ impl<A: FrameAllocator> Mapper<A> {
     pub unsafe fn make_current_and_flush_tlb(&self) {
         unsafe {
             self.make_current();
+            self.flush_tlb();
+        }
+    }
+
+    pub unsafe fn flush_tlb(&self) {
+        unsafe {
             Arch::invalidate_all();
         }
     }
@@ -135,7 +125,7 @@ impl<A: FrameAllocator> Mapper<A> {
         phys: PhysAddr,
         flags: PageFlags,
     ) -> Result<PageFlush, MemError> {
-        let entry = PageTableEntry::new(phys.value(), flags.raw());
+        let entry = PageTableEntry::new(phys.value(), flags);
         let mut table = self.table();
 
         loop {
@@ -160,7 +150,7 @@ impl<A: FrameAllocator> Mapper<A> {
                         let next_phys = unsafe { self.allocator.allocate_one()? };
                         table.set_entry(
                             i,
-                            PageTableEntry::new(next_phys.value(), Arch::PAGE_FLAG_TABLE_DEFAULTS),
+                            PageTableEntry::new(next_phys.value(), PageFlags::new_table()),
                         )?;
                         table.next(i)?
                     }

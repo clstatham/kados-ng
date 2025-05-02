@@ -11,6 +11,7 @@
 
 use core::sync::atomic::Ordering;
 
+use alloc::vec;
 use arch::{Arch, ArchTrait};
 use limine::{
     memory_map::EntryType,
@@ -25,6 +26,8 @@ use mem::{
 };
 use spin::Once;
 use xmas_elf::ElfFile;
+
+extern crate alloc;
 
 pub mod arch;
 pub mod logging;
@@ -165,7 +168,9 @@ pub extern "C" fn kernel_main() -> ! {
 
 #[unsafe(no_mangle)]
 pub extern "C" fn kernel_main_post_paging() -> ! {
-    unsafe { Arch::invalidate_all() };
+    unsafe {
+        Arch::invalidate_all();
+    }
 
     log::info!("Initializing kernel ELF file info");
     let kernel_file_addr = KERNEL_ELF_PHYSADDR.get().unwrap().as_hhdm_virt();
@@ -174,10 +179,19 @@ pub extern "C" fn kernel_main_post_paging() -> ! {
         unsafe { core::slice::from_raw_parts(kernel_file_addr.as_raw_ptr(), kernel_file_size) };
     KERNEL_ELF.call_once(|| ElfFile::new(kernel_file_data).expect("Error parsing kernel ELF file"));
 
+    log::info!("Initializing heap");
+
+    unsafe {
+        mem::heap::init_heap().expect("Error initializing heap");
+    }
+
     log::info!("Kernel boot finished at {}", arch::time::Instant::now());
 
     #[cfg(test)]
     test_main();
+
+    let v = vec![1usize; 1000];
+    log::debug!("{:?}", v.iter().sum::<usize>());
 
     log::info!("Welcome to KaDOS!");
 

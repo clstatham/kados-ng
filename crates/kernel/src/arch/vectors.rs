@@ -1,3 +1,5 @@
+use aarch64_cpu::registers::*;
+
 use crate::{mem::units::VirtAddr, println};
 
 core::arch::global_asm!(
@@ -347,6 +349,26 @@ exception_stack!(__serr_current_el_sp0, |stack| {
     panic!("{}", stringify!(__serr_current_el_sp0))
 });
 exception_stack!(__sync_current_el_spx, |stack| {
+    println!("SYNCHRONOUS EXCEPTION (current EL, SPX)");
+    let error_code = exception_code(stack.iret.esr_el1);
+    println!("Code: {:#x}", error_code);
+    if error_code == 0x25 {
+        println!("Translation Fault");
+        let faulted_addr = unsafe { VirtAddr::new_unchecked(FAR_EL1.get() as usize) };
+        println!("Faulted addr: {}", faulted_addr);
+
+        let iss = stack.iret.esr_el1 & 0x1ffffff;
+        let wn_r = (iss >> 6) & 1 == 1;
+        let dfsc = iss & 0x3f;
+
+        match dfsc {
+            0b000000..=0b000011 => page_not_present(faulted_addr, wn_r, dfsc),
+            0b001101..=0b001111 => permission_fault(faulted_addr, wn_r, dfsc),
+            0b001001..=0b001011 => access_flag_fault(faulted_addr, wn_r, dfsc),
+            _ => unhandled_fault(faulted_addr, wn_r, dfsc),
+        }
+    }
+    println!("-----------------");
     stack.dump();
     panic!("{}", stringify!(__sync_current_el_spx))
 });
@@ -394,3 +416,17 @@ exception_stack!(__serr_lower_el_a32, |stack| {
     stack.dump();
     panic!("{}", stringify!(__serr_lower_el_a32))
 });
+
+fn page_not_present(faulted_addr: VirtAddr, caused_by_write: bool, dfsc: usize) {
+    println!("Page not present (write = {})", caused_by_write);
+}
+fn permission_fault(faulted_addr: VirtAddr, caused_by_write: bool, dfsc: usize) {
+    println!("Permission fault (write = {})", caused_by_write);
+}
+fn access_flag_fault(faulted_addr: VirtAddr, caused_by_write: bool, dfsc: usize) {
+    println!("Access flag fault (write = {})", caused_by_write);
+}
+fn unhandled_fault(faulted_addr: VirtAddr, caused_by_write: bool, dfsc: usize) {
+    println!("Unhandled fault (write = {})", caused_by_write);
+    println!("dfsc: {:#b}", dfsc);
+}

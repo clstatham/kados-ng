@@ -51,7 +51,7 @@ impl Args {
 const LIMINE_GIT_URL: &str = "https://github.com/limine-bootloader/limine.git";
 const LINKER_SCRIPT_NAME: &str = "linker.ld";
 const KERNEL_ELF_NAME: &str = "kernel";
-const KERNEL_IMG_NAME: &str = "kernel8.img";
+const KERNEL_IMG_NAME: &str = "kados.img";
 
 fn main() -> anyhow::Result<()> {
     let args = Args::parse();
@@ -227,10 +227,7 @@ fn main() -> anyhow::Result<()> {
     }
 
     if !matches!(args.mode, Mode::Build | Mode::RaspiBuild) {
-        let qemu_drive_arg = format!(
-            "if=none,file={},format=raw,id=hd",
-            kernel_img_path.display()
-        );
+        let qemu_drive_arg = format!("if=none,file={},format=raw", kernel_img_path.display());
         let qemu_drive_arg_rpi = format!("if=sd,format=raw,file={}", kernel_img_path.display());
 
         let mut qemu_args = vec![];
@@ -254,12 +251,10 @@ fn main() -> anyhow::Result<()> {
                 "virt",
                 "-cpu",
                 "cortex-a72",
-                "-bios",
-                "/usr/share/edk2/aarch64/QEMU_EFI.fd",
+                "-kernel",
+                "u-boot/u-boot.bin",
                 "-drive",
                 &qemu_drive_arg,
-                "-device",
-                "virtio-blk-device,drive=hd",
             ]);
         }
 

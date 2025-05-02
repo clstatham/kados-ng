@@ -23,7 +23,7 @@ impl ArchTrait for AArch64 {
     const PAGE_FLAG_PAGE_DEFAULTS: usize = Self::PAGE_FLAG_PRESENT | 1 << 1 | 1 << 10;
 
     const PAGE_FLAG_TABLE_DEFAULTS: usize =
-        Self::PAGE_FLAG_PRESENT | Self::PAGE_FLAG_READWRITE | 1 << 1 | 1 << 10;
+        Self::PAGE_FLAG_PRESENT | Self::PAGE_FLAG_READWRITE | 1 << 1;
 
     const PAGE_FLAG_PRESENT: usize = 1 << 0;
 

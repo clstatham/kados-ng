@@ -137,28 +137,9 @@ pub unsafe fn map_memory() -> ! {
         let stack_top =
             (stack_base.add(stack_size.to_bytes())).value() + VirtAddr::MIN_HIGH.value();
 
-        let first = mapper.table().entry_virt_addr(0).unwrap(); // 1st page-table page
-        let bytes = Arch::PAGE_ENTRIES * size_of::<usize>();
-
-        core::arch::asm!(
-            "1:  dc  cvau, {first}",                 // push one cache line
-            "    add {first}, {first}, #64",
-            "    subs {bytes}, {bytes}, #64",
-            "    b.ne 1b",
-            "    dsb ishst",                         // lines visible to the MMU
-            first = inout(reg) first.value() => _,
-            bytes = inout(reg) bytes => _,
-            options(nostack, preserves_flags)
-        );
-
         mapper.make_current();
 
-        // log::debug!("Page table switched, remapping stack");
-
-        HHDM_PHYSICAL_OFFSET.store(
-            VirtAddr::MIN_HIGH.value(),
-            core::sync::atomic::Ordering::SeqCst,
-        );
+        Arch::init_mem();
 
         Arch::set_stack_pointer(
             VirtAddr::new_canonical(stack_top),
