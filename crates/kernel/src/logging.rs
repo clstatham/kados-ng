@@ -41,6 +41,14 @@ impl Log for Logger {
             record.target().split("::").last().unwrap_or(""),
             record.args(),
         ));
+        crate::framebuffer::_fb_print(format_args!(
+            "[{}] [{}.{:09}] [{}] {}\n",
+            level_str,
+            uptime_secs,
+            uptime_subsec_nanos,
+            record.target().split("::").last().unwrap_or(""),
+            record.args(),
+        ));
     }
 }
 

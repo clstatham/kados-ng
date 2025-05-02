@@ -10,10 +10,7 @@ use crate::{
     mem::units::VirtAddr,
 };
 
-use super::{
-    HHDM_PHYSICAL_OFFSET,
-    units::{FrameCount, PhysAddr},
-};
+use super::units::{FrameCount, PhysAddr};
 
 pub mod allocator;
 pub mod mapper;

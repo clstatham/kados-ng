@@ -11,13 +11,13 @@
 
 use core::sync::atomic::Ordering;
 
-use alloc::vec;
 use arch::{Arch, ArchTrait};
+use framebuffer::FramebufferInfo;
 use limine::{
     memory_map::EntryType,
     request::{
-        DateAtBootRequest, EntryPointRequest, ExecutableFileRequest, HhdmRequest, MemoryMapRequest,
-        StackSizeRequest,
+        DateAtBootRequest, EntryPointRequest, ExecutableFileRequest, FramebufferRequest,
+        HhdmRequest, MemoryMapRequest, StackSizeRequest,
     },
 };
 use mem::{
@@ -33,6 +33,8 @@ pub mod arch;
 pub mod logging;
 #[macro_use]
 pub mod serial;
+#[macro_use]
+pub mod framebuffer;
 pub mod mem;
 pub mod panicking;
 #[cfg(test)]
@@ -44,10 +46,13 @@ static _STACK: StackSizeRequest = StackSizeRequest::new().with_size(KERNEL_STACK
 static BOOT_TIME: DateAtBootRequest = DateAtBootRequest::new();
 static MEM_MAP: MemoryMapRequest = MemoryMapRequest::new();
 static KERNEL_FILE: ExecutableFileRequest = ExecutableFileRequest::new();
+static FRAMEBUFFER_REQUEST: FramebufferRequest = FramebufferRequest::new();
 
 static KERNEL_ELF_PHYSADDR: Once<PhysAddr> = Once::new();
 static KERNEL_ELF_SIZE: Once<usize> = Once::new();
 static KERNEL_ELF: Once<ElfFile<'static>> = Once::new();
+
+static FRAMEBUFFER_INFO: Once<FramebufferInfo> = Once::new();
 
 pub const KERNEL_OFFSET: usize = 0xffffffff80000000; // must match linker.ld
 pub const KERNEL_STACK_SIZE: usize = 0x200000;
@@ -106,6 +111,15 @@ pub extern "C" fn kernel_main() -> ! {
         Arch::init_interrupts();
         Arch::enable_interrupts();
     }
+
+    let fb_tag = FRAMEBUFFER_REQUEST.get_response().unwrap();
+    let fb0 = fb_tag.framebuffers().next().unwrap();
+    FRAMEBUFFER_INFO.call_once(|| FramebufferInfo {
+        base: fb0.addr() as usize,
+        width: fb0.width() as usize,
+        height: fb0.height() as usize,
+        bpp: fb0.bpp() as usize,
+    });
 
     log::info!("Kernel starting...");
 
@@ -185,13 +199,13 @@ pub extern "C" fn kernel_main_post_paging() -> ! {
         mem::heap::init_heap().expect("Error initializing heap");
     }
 
+    log::info!("Initializing framebuffer");
+    framebuffer::init(*FRAMEBUFFER_INFO.get().unwrap());
+
     log::info!("Kernel boot finished at {}", arch::time::Instant::now());
 
     #[cfg(test)]
     test_main();
-
-    let v = vec![1usize; 1000];
-    log::debug!("{:?}", v.iter().sum::<usize>());
 
     log::info!("Welcome to KaDOS!");
 

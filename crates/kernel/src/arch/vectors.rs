@@ -417,16 +417,16 @@ exception_stack!(__serr_lower_el_a32, |stack| {
     panic!("{}", stringify!(__serr_lower_el_a32))
 });
 
-fn page_not_present(faulted_addr: VirtAddr, caused_by_write: bool, dfsc: usize) {
+fn page_not_present(_faulted_addr: VirtAddr, caused_by_write: bool, _dfsc: usize) {
     println!("Page not present (write = {})", caused_by_write);
 }
-fn permission_fault(faulted_addr: VirtAddr, caused_by_write: bool, dfsc: usize) {
+fn permission_fault(_faulted_addr: VirtAddr, caused_by_write: bool, _dfsc: usize) {
     println!("Permission fault (write = {})", caused_by_write);
 }
-fn access_flag_fault(faulted_addr: VirtAddr, caused_by_write: bool, dfsc: usize) {
+fn access_flag_fault(_faulted_addr: VirtAddr, caused_by_write: bool, _dfsc: usize) {
     println!("Access flag fault (write = {})", caused_by_write);
 }
-fn unhandled_fault(faulted_addr: VirtAddr, caused_by_write: bool, dfsc: usize) {
+fn unhandled_fault(_faulted_addr: VirtAddr, caused_by_write: bool, dfsc: usize) {
     println!("Unhandled fault (write = {})", caused_by_write);
     println!("dfsc: {:#b}", dfsc);
 }

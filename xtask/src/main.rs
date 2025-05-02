@@ -19,6 +19,11 @@ enum Mode {
     RaspiQemu,
     /// Build the kernel for a Raspberry Pi 4b and run it in QEMU with debug options (gdbserver)
     RaspiDebug,
+    /// Flash the built image to an SD card for the Raspberry Pi
+    RaspiFlash {
+        /// Device to flash to (e.g. /dev/sdb)
+        device: String,
+    },
     /// Internal mode used by the test runner
     #[clap(hide = true)]
     TestRunner {
@@ -71,6 +76,16 @@ fn main() -> anyhow::Result<()> {
         "-C link-arg=-T{} -Cforce-frame-pointers=yes -C symbol-mangling-version=v0",
         arch_dir.join(LINKER_SCRIPT_NAME).display(),
     );
+
+    if let Mode::RaspiFlash { device } = args.mode {
+        cmd!(
+            sh,
+            "sudo dd if=target/aarch64-kados/debug/kados.img of={device} bs=4M status=progress"
+        )
+        .run()?;
+        cmd!(sh, "sync").run()?;
+        return Ok(());
+    }
 
     let mut cargo_args = vec![];
 
