@@ -1,7 +1,6 @@
 use core::fmt::Debug;
 
 use crate::{
-    __rodata_end, __rodata_start, __text_end, __text_start,
     arch::{Arch, ArchTrait},
     mem::{
         MemError,
@@ -156,10 +155,10 @@ impl PageFlags {
     pub fn new() -> Self {
         Self(
             Arch::PAGE_FLAG_PAGE_DEFAULTS
-                | Arch::PAGE_FLAG_READWRITE
-                // | Arch::PAGE_FLAG_READONLY
-                // | Arch::PAGE_FLAG_NON_EXECUTABLE
-                | Arch::PAGE_FLAG_EXECUTABLE
+                // | Arch::PAGE_FLAG_READWRITE
+                | Arch::PAGE_FLAG_READONLY
+                | Arch::PAGE_FLAG_NON_EXECUTABLE
+                // | Arch::PAGE_FLAG_EXECUTABLE
                 | Arch::PAGE_FLAG_NON_GLOBAL,
         )
     }
@@ -182,17 +181,6 @@ impl PageFlags {
 
     pub fn new_for_data_segment() -> Self {
         Self::new().writable()
-    }
-
-    pub fn new_for_addr(addr: VirtAddr) -> Self {
-        let value = addr.value();
-        if (__text_start()..__text_end()).contains(&value) {
-            Self::new_for_text_segment()
-        } else if (__rodata_start()..__rodata_end()).contains(&value) {
-            Self::new_for_rodata_segment()
-        } else {
-            Self::new_for_data_segment()
-        }
     }
 
     pub fn from_raw(raw: usize) -> Self {

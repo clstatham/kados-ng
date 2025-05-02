@@ -64,6 +64,8 @@ pub trait ArchTrait {
     unsafe fn current_page_table() -> PhysAddr;
     unsafe fn set_current_page_table(addr: PhysAddr);
 
+    unsafe fn set_stack_pointer(sp: VirtAddr, next_fn: extern "C" fn() -> !) -> !;
+
     fn exit_qemu(code: u32) -> !;
     fn hcf() -> !;
 }

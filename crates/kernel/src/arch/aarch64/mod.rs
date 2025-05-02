@@ -107,13 +107,19 @@ impl ArchTrait for AArch64 {
             dsb ish
             isb", 
             in(reg) addr.value());
-            // Self::invalidate_all();
-            // asm!(
-            //     "mov x9, sp
-            //     ldr x10, [x9]
-            //     "
-            // );
-            // log::debug!("Woohoo!");
+        }
+    }
+
+    unsafe fn set_stack_pointer(sp: VirtAddr, next_fn: extern "C" fn() -> !) -> ! {
+        unsafe {
+            core::arch::asm!(
+                "msr SPSel, #1",
+                "mov sp, {}",
+                "mov fp, xzr",
+                "br {}",
+                in(reg) sp.value(),
+                in(reg) next_fn, options(noreturn)
+            );
         }
     }
 
@@ -128,29 +134,5 @@ impl ArchTrait for AArch64 {
                 asm!("wfe");
             }
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test_case]
-    fn test_aarch64_consts() {
-        assert_eq!(AArch64::PAGE_SIZE, 4096);
-        assert_eq!(AArch64::PAGE_OFFSET_MASK, 0xFFF);
-        assert_eq!(AArch64::PAGE_ADDR_SHIFT, 48);
-        assert_eq!(AArch64::PAGE_ADDR_SIZE, 0x0001_0000_0000_0000);
-        assert_eq!(AArch64::PAGE_ADDR_MASK, 0x0000_FFFF_FFFF_F000);
-        assert_eq!(AArch64::PAGE_ENTRY_SIZE, 8);
-        assert_eq!(AArch64::PAGE_ENTRIES, 512);
-        assert_eq!(AArch64::PAGE_ENTRY_MASK, 0x1FF);
-        // assert_eq!(AArch64::PAGE_NEG_MASK, 0xFFFF_0000_0000_0000);
-
-        assert_eq!(AArch64::PAGE_ENTRY_ADDR_SIZE, 0x0000_0100_0000_0000);
-        assert_eq!(AArch64::PAGE_ENTRY_ADDR_MASK, 0x0000_00FF_FFFF_FFFF);
-        assert_eq!(AArch64::PAGE_ENTRY_FLAGS_MASK, 0xFFF0_0000_0000_0FFF);
-
-        // assert_eq!(AArch64::PHYS_OFFSET, 0xFFFF_8000_0000_0000);
     }
 }

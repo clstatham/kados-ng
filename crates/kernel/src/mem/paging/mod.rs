@@ -97,7 +97,7 @@ pub unsafe fn map_memory() -> ! {
             for frame_idx in 0..entry.size.frame_count() {
                 let phys = PhysAddr::new_canonical(base.value() + frame_idx * Arch::PAGE_SIZE);
                 let virt = VirtAddr::new_canonical(phys.value() + VirtAddr::MIN_HIGH.value());
-                let flags = PageFlags::new_for_addr(virt);
+                let flags = PageFlags::new_for_data_segment();
                 let flush = mapper.map_to(virt, phys, flags).unwrap();
                 flush.ignore();
             }
@@ -110,7 +110,7 @@ pub unsafe fn map_memory() -> ! {
         for frame_idx in 0..kernel_size.frame_count() {
             let phys = PhysAddr::new_canonical(kernel_base.value() + frame_idx * Arch::PAGE_SIZE);
             let virt = VirtAddr::new_canonical(KERNEL_OFFSET + frame_idx * Arch::PAGE_SIZE);
-            let flags = PageFlags::new_for_addr(virt);
+            let flags = PageFlags::new().executable().writable();
             let flush = mapper.map_to(virt, phys, flags).unwrap();
             flush.ignore();
         }
@@ -123,12 +123,6 @@ pub unsafe fn map_memory() -> ! {
                 }
             }
         }
-
-        const MAIR_EL1: usize = 0xFF | (0x04 << 8); // WB/WA cacheable RAM | Device-NgNRE
-        // Provide the MMU with its parameters
-        core::arch::asm!(
-            r###"
-            msr  mair_el1, {}"###, in(reg) MAIR_EL1, options(nostack));
 
         mapper.make_current();
 
@@ -150,15 +144,9 @@ pub unsafe fn map_memory() -> ! {
         let stack_top =
             (stack_base.add(stack_size.to_bytes())).value() + VirtAddr::MIN_HIGH.value();
 
-        core::arch::asm!("msr SPSel, #1", "mov sp, {}", in(reg) stack_top); // stack top
-
-        Arch::invalidate_all();
-
-        core::arch::asm!(
-            "
-        mov x29, xzr
-        bl kernel_main_post_paging",
-            options(noreturn)
+        Arch::set_stack_pointer(
+            VirtAddr::new_canonical(stack_top),
+            crate::kernel_main_post_paging,
         )
     }
 }

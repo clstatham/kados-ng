@@ -20,6 +20,7 @@ use limine::{
     },
 };
 use mem::{
+    hhdm_physical_offset,
     paging::{MEM_MAP_ENTRIES, MemMapEntries, MemMapEntry, allocator::add_kernel_frames},
     units::{FrameCount, PhysAddr},
 };
@@ -37,14 +38,17 @@ pub mod testing;
 
 static HHDM: HhdmRequest = HhdmRequest::new();
 static _ENTRY_POINT: EntryPointRequest = EntryPointRequest::new().with_entry_point(kernel_main);
-static _STACK: StackSizeRequest = StackSizeRequest::new().with_size(0x6400000);
+static _STACK: StackSizeRequest = StackSizeRequest::new().with_size(KERNEL_STACK_SIZE as u64);
 static BOOT_TIME: DateAtBootRequest = DateAtBootRequest::new();
 static MEM_MAP: MemoryMapRequest = MemoryMapRequest::new();
 static KERNEL_FILE: ExecutableFileRequest = ExecutableFileRequest::new();
 
+static KERNEL_ELF_PHYSADDR: Once<PhysAddr> = Once::new();
+static KERNEL_ELF_SIZE: Once<usize> = Once::new();
 static KERNEL_ELF: Once<ElfFile<'static>> = Once::new();
 
 pub const KERNEL_OFFSET: usize = 0xffffffff80000000; // must match linker.ld
+pub const KERNEL_STACK_SIZE: usize = 0x200000;
 
 macro_rules! elf_offsets {
     ($($name:ident),* $(,)?) => {
@@ -92,17 +96,14 @@ pub extern "C" fn kernel_main() -> ! {
 
     let kernel_file = KERNEL_FILE.get_response().unwrap();
     let kernel_file = kernel_file.file();
-    let kernel_file_data =
-        unsafe { core::slice::from_raw_parts(kernel_file.addr(), kernel_file.size() as usize) };
-    KERNEL_ELF.call_once(|| ElfFile::new(kernel_file_data).expect("Error parsing kernel ELF file"));
+    let kernel_elf_physaddr = kernel_file.addr() as usize - hhdm.offset() as usize;
+    KERNEL_ELF_PHYSADDR.call_once(|| PhysAddr::new_canonical(kernel_elf_physaddr));
+    KERNEL_ELF_SIZE.call_once(|| kernel_file.size() as usize);
 
     unsafe {
         Arch::init_interrupts();
         Arch::enable_interrupts();
     }
-
-    #[cfg(test)]
-    test_main();
 
     log::info!("Kernel starting...");
 
@@ -158,16 +159,26 @@ pub extern "C" fn kernel_main() -> ! {
     add_kernel_frames(MEM_MAP_ENTRIES.get().unwrap().usable_entries());
 
     unsafe {
-        log::info!("Remapping kernel");
+        log::info!("Mapping memory");
         mem::paging::map_memory()
     }
-
-    // Arch::hcf()
 }
 
 #[unsafe(no_mangle)]
 pub extern "C" fn kernel_main_post_paging() -> ! {
+    unsafe { Arch::invalidate_all() };
+
+    log::info!("Initializing kernel ELF file info");
+    let kernel_file_addr = KERNEL_ELF_PHYSADDR.get().unwrap().as_hhdm_virt();
+    let kernel_file_size = *KERNEL_ELF_SIZE.get().unwrap();
+    let kernel_file_data =
+        unsafe { core::slice::from_raw_parts(kernel_file_addr.as_raw_ptr(), kernel_file_size) };
+    KERNEL_ELF.call_once(|| ElfFile::new(kernel_file_data).expect("Error parsing kernel ELF file"));
+
     log::info!("Kernel boot finished at {}", arch::time::Instant::now());
+
+    #[cfg(test)]
+    test_main();
 
     log::info!("Welcome to KaDOS!");
 
