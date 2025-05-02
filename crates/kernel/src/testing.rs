@@ -15,11 +15,13 @@ where
 
 #[cfg(test)]
 pub fn test_runner(tests: &[&dyn Test]) {
+    use crate::arch::{Arch, ArchTrait};
+
     log::info!("Running tests...");
 
     for test in tests {
         test.run();
     }
 
-    crate::arch::exit_qemu(0);
+    Arch::exit_qemu(0);
 }

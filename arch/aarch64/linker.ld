@@ -3,10 +3,10 @@ ENTRY(kernel_main)
 
 PHDRS
 {
-    limine_requests PT_LOAD;
     text PT_LOAD;
     rodata PT_LOAD;
     data PT_LOAD;
+    vectors PT_LOAD;
 }
 
 
@@ -15,38 +15,36 @@ KERNEL_OFFSET = 0xffffffff80000000;
 SECTIONS
 {
     . = KERNEL_OFFSET;
-    . += SIZEOF_HEADERS;
 
-    .limine_requests : {
-        KEEP(*(.limine_requests_start))
-        KEEP(*(.limine_requests))
-        KEEP(*(.limine_requests_end))
-    } :limine_requests
+    . = ALIGN(4096);
 
-    . = ALIGN(CONSTANT(MAXPAGESIZE));
-
-    text : {
-        *(.text .text.*)
+    .text : AT(ADDR(.text) - KERNEL_OFFSET) {
+        __text_start = .;
+        *(.text)
+        . = ALIGN(0x800);
+        KEEP(*(.text.vectors*))
+	. = ALIGN(4096);
+        __text_end = .;
     }
 
-    . = ALIGN(CONSTANT(MAXPAGESIZE));
-
-    .rodata : {
-        *(.rodata .rodata.*)
+    .rodata : AT(ADDR(.rodata) - KERNEL_OFFSET) {
+        __rodata_start = .;
+        *(.rodata*)
+	. = ALIGN(4096);
+        __rodata_end = .;
     }
 
-    . = ALIGN(CONSTANT(MAXPAGESIZE));
-
-    .data : {
-        *(.data .data.*)
+    .data : AT(ADDR(.data) - KERNEL_OFFSET) {
+        __data_start = .;
+        *(.data*)
+	. = ALIGN(4096);
+        __data_end = .;
+        __bss_start = .;
+        *(.bss*)
+	. = ALIGN(4096);
+        __bss_end = .;
     }
 
-    . = ALIGN(CONSTANT(MAXPAGESIZE));
-
-    .bss (NOLOAD) : {
-        *(.bss .bss.*)
-        *(COMMON)
-    }
 
     /DISCARD/ : {
         *(.eh_frame*)

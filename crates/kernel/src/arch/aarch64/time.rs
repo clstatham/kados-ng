@@ -1,6 +1,6 @@
 use core::{
     fmt::Display,
-    num::{NonZeroU32, NonZeroU64, NonZeroU128},
+    num::{NonZeroU32, NonZeroU128, NonZeroUsize},
     ops::{Add, Div},
     time::Duration,
 };
@@ -9,7 +9,7 @@ use aarch64_cpu::{asm::barrier, registers::*};
 use chrono_light::prelude::*;
 use spin::Once;
 
-const NANOSEC_PER_SEC: NonZeroU64 = NonZeroU64::new(1_000_000_000).unwrap();
+const NANOSEC_PER_SEC: NonZeroUsize = NonZeroUsize::new(1_000_000_000).unwrap();
 
 #[unsafe(no_mangle)]
 static ARCH_TIMER_COUNTER_FREQUENCY: NonZeroU32 = NonZeroU32::MIN;
@@ -65,7 +65,7 @@ pub unsafe fn init(date_at_boot: Duration) {
 
 #[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]
 pub struct GenericTimerValue {
-    pub value: u64,
+    pub value: usize,
 }
 
 impl Add for GenericTimerValue {
@@ -79,7 +79,7 @@ impl Add for GenericTimerValue {
 }
 
 impl GenericTimerValue {
-    pub fn new(value: u64) -> Self {
+    pub fn new(value: usize) -> Self {
         Self { value }
     }
 }
@@ -89,14 +89,14 @@ impl From<GenericTimerValue> for Duration {
         if value.value == 0 {
             Duration::ZERO
         } else {
-            let frequency: NonZeroU64 = arch_timer_counter_frequency().into();
+            let frequency = arch_timer_counter_frequency().get() as usize;
 
-            let secs = value.value / frequency.get() as u64;
-            let sub_seconds = value.value % frequency.get() as u64;
+            let secs = value.value / frequency;
+            let sub_seconds = value.value % frequency;
             let nanos =
                 unsafe { sub_seconds.unchecked_mul(NANOSEC_PER_SEC.get()) }.div(frequency) as u32;
 
-            Duration::new(secs, nanos)
+            Duration::new(secs as u64, nanos)
         }
     }
 }
@@ -116,15 +116,15 @@ impl TryFrom<Duration> for GenericTimerValue {
         let frequency = u32::from(arch_timer_counter_frequency()) as u128;
         let duration = value.as_nanos();
 
-        let counter_value =
-            unsafe { duration.unchecked_mul(frequency) }.div(NonZeroU128::from(NANOSEC_PER_SEC));
+        let counter_value = unsafe { duration.unchecked_mul(frequency) }
+            .div(NonZeroU128::new(NANOSEC_PER_SEC.get() as u128).unwrap());
 
-        Ok(GenericTimerValue::new(counter_value as u64))
+        Ok(GenericTimerValue::new(counter_value as usize))
     }
 }
 
 fn max_duration() -> Duration {
-    Duration::from(GenericTimerValue::new(u64::MAX))
+    Duration::from(GenericTimerValue::new(usize::MAX))
 }
 
 pub fn resolution() -> Duration {
@@ -136,7 +136,7 @@ fn read_cntpct() -> GenericTimerValue {
     barrier::isb(barrier::SY);
     let cnt = CNTPCT_EL0.get();
 
-    GenericTimerValue::new(cnt)
+    GenericTimerValue::new(cnt as usize)
 }
 
 pub fn uptime() -> Duration {
@@ -154,7 +154,7 @@ pub fn spin_for(duration: Duration) {
     };
     let end = start + delta;
 
-    while GenericTimerValue::new(CNTPCT_EL0.get()) < end {
+    while GenericTimerValue::new(CNTPCT_EL0.get() as usize) < end {
         barrier::isb(barrier::SY);
     }
 }

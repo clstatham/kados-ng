@@ -16,9 +16,11 @@ log = "0.4.27"
 qemu-exit = "3.0"
 rand = {version = "0.9.1", default-features = false, features = []}
 rand_chacha = {version = "0.9.0", default-features = false}
+rustc-demangle = { version = "0.1.24", features = ["compiler_builtins", "core"] }
 spin = "0.10.0"
 thiserror = {version = "2.0.12", default-features = false}
 uuid = {version = "1.16.0", default-features = false, features = ["v8"]}
+xmas-elf = "0.10.0"
 
 [target.'cfg(target_arch = "aarch64")'.dependencies]
 aarch64-cpu = "10.0.0"

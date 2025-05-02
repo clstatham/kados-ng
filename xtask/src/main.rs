@@ -25,6 +25,10 @@ struct Args {
     /// Mode of operation
     #[command(subcommand)]
     mode: Mode,
+
+    /// Extra args to pass to qemu
+    #[clap(long, value_parser)]
+    extra_qemu_args: Option<String>,
 }
 
 impl Args {
@@ -178,11 +182,21 @@ fn main() -> anyhow::Result<()> {
         &qemu_drive_arg,
         "-device",
         "virtio-blk-device,drive=hd",
+        "-D",
+        "target/log.txt",
+        "-d",
+        "int,guest_errors",
     ];
 
     if args.mode == Mode::Debug {
         qemu_args.push("-s");
         qemu_args.push("-S");
+    }
+
+    if let Some(extra_args) = args.extra_qemu_args.as_ref() {
+        for arg in extra_args.split_whitespace() {
+            qemu_args.push(arg);
+        }
     }
 
     cmd!(sh, "qemu-system-aarch64").args(qemu_args).run()?;

@@ -1,10 +1,17 @@
 #![no_std]
 #![no_main]
-#![allow(internal_features, clippy::missing_safety_doc)]
+#![allow(
+    internal_features,
+    clippy::missing_safety_doc,
+    clippy::new_without_default
+)]
 #![feature(lang_items, test, custom_test_frameworks)]
 #![test_runner(crate::testing::test_runner)]
 #![reexport_test_harness_main = "test_main"]
 
+use core::sync::atomic::Ordering;
+
+use arch::{Arch, ArchTrait};
 use limine::{
     memory_map::EntryType,
     request::{
@@ -12,27 +19,61 @@ use limine::{
         StackSizeRequest,
     },
 };
+use mem::{
+    paging::{MEM_MAP_ENTRIES, MemMapEntries, MemMapEntry, allocator::add_kernel_frames},
+    units::{FrameCount, PhysAddr},
+};
+use spin::Once;
+use xmas_elf::ElfFile;
 
 pub mod arch;
 pub mod logging;
 #[macro_use]
 pub mod serial;
-pub mod mmu;
+pub mod mem;
 pub mod panicking;
 #[cfg(test)]
 pub mod testing;
 
 static HHDM: HhdmRequest = HhdmRequest::new();
 static _ENTRY_POINT: EntryPointRequest = EntryPointRequest::new().with_entry_point(kernel_main);
-static _STACK: StackSizeRequest = StackSizeRequest::new().with_size(0x20000);
+static _STACK: StackSizeRequest = StackSizeRequest::new().with_size(0x6400000);
 static BOOT_TIME: DateAtBootRequest = DateAtBootRequest::new();
 static MEM_MAP: MemoryMapRequest = MemoryMapRequest::new();
-// static KRENEL_FILE: ExecutableFileRequest = ExecutableFileRequest::new();
+static KERNEL_FILE: ExecutableFileRequest = ExecutableFileRequest::new();
+
+static KERNEL_ELF: Once<ElfFile<'static>> = Once::new();
+
+pub const KERNEL_OFFSET: usize = 0xffffffff80000000; // must match linker.ld
+
+macro_rules! elf_offsets {
+    ($($name:ident),* $(,)?) => {
+        $(
+            pub fn $name() -> usize {
+                unsafe extern "C" {
+                    unsafe static $name: u8;
+                }
+                unsafe { &$name as *const u8 as usize }
+            }
+        )*
+    };
+}
+
+elf_offsets!(
+    __text_start,
+    __text_end,
+    __rodata_start,
+    __rodata_end,
+    __data_start,
+    __data_end,
+    __bss_start,
+    __bss_end,
+);
 
 #[unsafe(no_mangle)]
 pub extern "C" fn kernel_main() -> ! {
     let hhdm = HHDM.get_response().unwrap();
-    mmu::HDDM_PHYSICAL_OFFSET.call_once(|| hhdm.offset());
+    mem::HHDM_PHYSICAL_OFFSET.store(hhdm.offset() as usize, Ordering::SeqCst);
 
     let boot_time = BOOT_TIME.get_response().unwrap();
 
@@ -49,6 +90,17 @@ pub extern "C" fn kernel_main() -> ! {
 
     logging::init();
 
+    let kernel_file = KERNEL_FILE.get_response().unwrap();
+    let kernel_file = kernel_file.file();
+    let kernel_file_data =
+        unsafe { core::slice::from_raw_parts(kernel_file.addr(), kernel_file.size() as usize) };
+    KERNEL_ELF.call_once(|| ElfFile::new(kernel_file_data).expect("Error parsing kernel ELF file"));
+
+    unsafe {
+        Arch::init_interrupts();
+        Arch::enable_interrupts();
+    }
+
     #[cfg(test)]
     test_main();
 
@@ -56,24 +108,70 @@ pub extern "C" fn kernel_main() -> ! {
 
     let mem_map = MEM_MAP.get_response().unwrap();
     let mut total_free = 0;
-    for entry in mem_map
-        .entries()
-        .iter()
-        .filter(|e| e.entry_type == EntryType::USABLE)
-    {
-        log::info!(
-            "usable region: {:016x} .. {:016x}",
-            entry.base,
-            entry.base + entry.length,
-        );
-        total_free += entry.length;
+    let mut mem_map_entries = MemMapEntries::new();
+    for entry in mem_map.entries().iter() {
+        match entry.entry_type {
+            EntryType::USABLE => {
+                log::info!(
+                    "usable region: {:016x} .. {:016x}",
+                    entry.base,
+                    entry.base + entry.length,
+                );
+                total_free += entry.length;
+                mem_map_entries.push_usable(MemMapEntry {
+                    base: PhysAddr::new_canonical(entry.base as usize),
+                    size: FrameCount::from_bytes(entry.length as usize),
+                    kind: entry.entry_type,
+                });
+            }
+            EntryType::BOOTLOADER_RECLAIMABLE | EntryType::ACPI_RECLAIMABLE => {
+                log::info!(
+                    "Reclaimable region: {:016x} .. {:016x}",
+                    entry.base,
+                    entry.base + entry.length
+                );
+                mem_map_entries.push_identity_map(MemMapEntry {
+                    base: PhysAddr::new_canonical(entry.base as usize),
+                    size: FrameCount::from_bytes(entry.length as usize),
+                    kind: entry.entry_type,
+                });
+            }
+            EntryType::EXECUTABLE_AND_MODULES => {
+                log::info!(
+                    "kernel at {:016x} .. {:016x}",
+                    entry.base,
+                    entry.base + entry.length
+                );
+                mem_map_entries.set_kernel_entry(MemMapEntry {
+                    base: PhysAddr::new_canonical(entry.base as usize),
+                    size: FrameCount::from_bytes(entry.length as usize),
+                    kind: entry.entry_type,
+                })
+            }
+            _ => {}
+        }
     }
     log::info!("{total_free} bytes free");
+    MEM_MAP_ENTRIES.call_once(|| mem_map_entries);
 
+    log::info!("Adding memory map to kernel frame allocator");
+    add_kernel_frames(MEM_MAP_ENTRIES.get().unwrap().usable_entries());
+
+    unsafe {
+        log::info!("Remapping kernel");
+        mem::paging::map_memory()
+    }
+
+    // Arch::hcf()
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn kernel_main_post_paging() -> ! {
     log::info!("Kernel boot finished at {}", arch::time::Instant::now());
 
     log::info!("Welcome to KaDOS!");
-    arch::halt_loop()
+
+    Arch::hcf()
 }
 
 #[cfg(test)]
