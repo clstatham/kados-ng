@@ -5,7 +5,8 @@ use spin::{Once, mutex::SpinMutex};
 
 use crate::arch::driver::Driver;
 
-const PL011_BASE: *mut u8 = 0x0900_0000 as *mut u8; // Base address of PL011 UART
+// const PL011_BASE: *mut u8 = 0x0900_0000 as *mut u8; // Base address of PL011 UART
+const PL011_BASE: *mut u8 = 0xFE201000 as *mut u8; // RPi4
 
 pub struct Uart(Pl011Uart);
 

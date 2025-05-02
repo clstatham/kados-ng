@@ -38,7 +38,7 @@ fn panic(info: &core::panic::PanicInfo) -> ! {
         println!("Error unwinding stack: {}", e);
     }
 
-    Arch::exit_qemu(1);
+    Arch::hcf()
 }
 
 #[cfg(test)]
@@ -51,7 +51,7 @@ fn panic(info: &core::panic::PanicInfo) -> ! {
     Arch::exit_qemu(1);
 }
 
-fn print_symbol(pc: usize, symtab: &[Entry64], depth: usize, demangle: bool) {
+fn print_symbol(pc: usize, symtab: &[Entry64]) {
     let kernel_elf = KERNEL_ELF.get().unwrap();
     let mut name = None;
     for entry in symtab.iter() {
@@ -65,14 +65,10 @@ fn print_symbol(pc: usize, symtab: &[Entry64], depth: usize, demangle: bool) {
     }
 
     if let Some(name) = name {
-        let name = if demangle {
-            rustc_demangle::demangle(name).as_str()
-        } else {
-            name
-        };
-        println!("{:>2}: 0x{:016x} - {}", depth, pc, name);
+        rustc_demangle::demangle(name).as_str();
+        println!("       {}", name);
     } else {
-        println!("{:>2}: 0x{:016x} - <unknown>", depth, pc);
+        println!("       <unknown>");
     }
 }
 
@@ -86,6 +82,7 @@ pub enum UnwindStackError {
     FailedToGetSectionData,
 }
 
+#[inline(always)]
 pub fn unwind_kernel_stack() -> Result<(), UnwindStackError> {
     let kernel_elf = KERNEL_ELF
         .get()
@@ -112,6 +109,9 @@ pub fn unwind_kernel_stack() -> Result<(), UnwindStackError> {
     unsafe {
         core::arch::asm!("mov {}, fp", out(reg) fp);
     }
+    let mut pc_ptr_opt = fp
+        .checked_add(size_of::<usize>())
+        .map(|p| p as *const usize);
 
     if fp == 0 {
         println!("<empty backtrace>");
@@ -121,24 +121,33 @@ pub fn unwind_kernel_stack() -> Result<(), UnwindStackError> {
     let mapper = unsafe { Mapper::current(KernelFrameAllocator) };
 
     println!("---BEGIN BACKTRACE---");
-    for depth in 0..16 {
-        if let Some(pc_fp) = fp.checked_add(size_of::<usize>()) {
-            let pc_fp = unsafe { VirtAddr::new_unchecked(pc_fp) };
-            if mapper.translate(pc_fp).is_err() {
-                println!("{:>2}: <guard page>", depth);
+    for depth in 0..64 {
+        if let Some(pc_ptr) = pc_ptr_opt {
+            let fp_va = unsafe { VirtAddr::new_unchecked(fp) };
+            let pc_va = unsafe { VirtAddr::new_unchecked(pc_ptr as usize) };
+            let align_usize = align_of::<usize>();
+            if fp_va.is_aligned(align_usize)
+                && pc_va.is_aligned(align_usize)
+                && mapper.translate(fp_va).is_ok()
+                && mapper.translate(pc_va).is_ok()
+            {
+                let pc = unsafe { *pc_ptr };
+                if pc == 0 {
+                    println!("{:>2}: FP={}:  <empty return>", depth, fp_va);
+                    break;
+                } else {
+                    println!("{:>2}: FP={} PC={}", depth, fp_va, pc_va);
+                    print_symbol(pc, symtab);
+
+                    fp = unsafe { *fp_va.as_raw_ptr::<usize>() };
+                    pc_ptr_opt = fp
+                        .checked_add(size_of::<usize>())
+                        .map(|p| p as *const usize);
+                }
+            } else {
+                println!("{:>2}: FP={}:  <guard page>", depth, fp_va);
                 break;
             }
-
-            let pc = unsafe { pc_fp.read::<usize>().unwrap_or(0) };
-            if pc == 0 || fp == 0 {
-                break;
-            }
-
-            unsafe {
-                fp = *(fp as *const usize);
-            }
-
-            print_symbol(pc, symtab, depth, true);
         } else {
             break;
         }

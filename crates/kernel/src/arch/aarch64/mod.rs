@@ -101,12 +101,10 @@ impl ArchTrait for AArch64 {
 
     unsafe fn set_current_page_table(addr: PhysAddr) {
         unsafe {
-            asm!("
-            dsb ishst
-            msr ttbr1_el1, {}
-            dsb ish
-            isb", 
-            in(reg) addr.value());
+            asm!("dsb ishst");
+            asm!("msr ttbr1_el1, {}", in(reg) addr.value());
+            asm!("dsb ish");
+            asm!("isb");
         }
     }
 

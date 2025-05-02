@@ -20,7 +20,6 @@ use limine::{
     },
 };
 use mem::{
-    hhdm_physical_offset,
     paging::{MEM_MAP_ENTRIES, MemMapEntries, MemMapEntry, allocator::add_kernel_frames},
     units::{FrameCount, PhysAddr},
 };

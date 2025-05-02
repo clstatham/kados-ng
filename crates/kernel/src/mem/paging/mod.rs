@@ -5,7 +5,7 @@ use spin::Once;
 use table::PageFlags;
 
 use crate::{
-    KERNEL_OFFSET,
+    KERNEL_OFFSET, KERNEL_STACK_SIZE,
     arch::{Arch, ArchTrait},
     mem::units::VirtAddr,
 };
@@ -124,14 +124,7 @@ pub unsafe fn map_memory() -> ! {
             }
         }
 
-        mapper.make_current();
-
-        HHDM_PHYSICAL_OFFSET.store(
-            VirtAddr::MIN_HIGH.value(),
-            core::sync::atomic::Ordering::SeqCst,
-        );
-
-        let stack_size = FrameCount::from_bytes(0x200000);
+        let stack_size = FrameCount::from_bytes(KERNEL_STACK_SIZE);
         let stack_base = KernelFrameAllocator.allocate(stack_size).unwrap();
         for frame_idx in 0..stack_size.frame_count() {
             let phys = PhysAddr::new_canonical(stack_base.value() + frame_idx * Arch::PAGE_SIZE);
@@ -143,6 +136,29 @@ pub unsafe fn map_memory() -> ! {
         }
         let stack_top =
             (stack_base.add(stack_size.to_bytes())).value() + VirtAddr::MIN_HIGH.value();
+
+        let first = mapper.table().entry_virt_addr(0).unwrap(); // 1st page-table page
+        let bytes = Arch::PAGE_ENTRIES * size_of::<usize>();
+
+        core::arch::asm!(
+            "1:  dc  cvau, {first}",                 // push one cache line
+            "    add {first}, {first}, #64",
+            "    subs {bytes}, {bytes}, #64",
+            "    b.ne 1b",
+            "    dsb ishst",                         // lines visible to the MMU
+            first = inout(reg) first.value() => _,
+            bytes = inout(reg) bytes => _,
+            options(nostack, preserves_flags)
+        );
+
+        mapper.make_current();
+
+        // log::debug!("Page table switched, remapping stack");
+
+        HHDM_PHYSICAL_OFFSET.store(
+            VirtAddr::MIN_HIGH.value(),
+            core::sync::atomic::Ordering::SeqCst,
+        );
 
         Arch::set_stack_pointer(
             VirtAddr::new_canonical(stack_top),

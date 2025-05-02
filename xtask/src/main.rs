@@ -5,12 +5,20 @@ use xshell::{Shell, cmd};
 
 #[derive(clap::Subcommand, Clone, Debug, PartialEq, Eq)]
 enum Mode {
+    /// Build the kernel
+    Build,
     /// Build the kernel and run it in QEMU
     Run,
     /// Build the kernel and run it in QEMU with debug options (gdbserver)
     Debug,
     /// Build the kernel and run the tests in QEMU
     Test,
+    /// Build the kernel for a Raspberry Pi 4b
+    RaspiBuild,
+    /// Build the kernel for a Raspberry Pi 4b and emulate it in QEMU
+    RaspiQemu,
+    /// Build the kernel for a Raspberry Pi 4b and run it in QEMU with debug options (gdbserver)
+    RaspiDebug,
     /// Internal mode used by the test runner
     #[clap(hide = true)]
     TestRunner {
@@ -43,13 +51,13 @@ impl Args {
 const LIMINE_GIT_URL: &str = "https://github.com/limine-bootloader/limine.git";
 const LINKER_SCRIPT_NAME: &str = "linker.ld";
 const KERNEL_ELF_NAME: &str = "kernel";
-const KERNEL_IMG_NAME: &str = "kados.img";
+const KERNEL_IMG_NAME: &str = "kernel8.img";
 
 fn main() -> anyhow::Result<()> {
     let args = Args::parse();
     let sh = Shell::new()?;
 
-    let build_target = "aarch64-unknown-none";
+    let build_target = "aarch64-kados";
     let target_dir = PathBuf::from(format!("target/{build_target}"));
     let build_target_dir = target_dir.join("debug");
     let arch_dir = PathBuf::from("arch/aarch64");
@@ -57,9 +65,11 @@ fn main() -> anyhow::Result<()> {
         .kernel_path()
         .unwrap_or_else(|| format!("{}/{}", build_target_dir.display(), KERNEL_ELF_NAME));
     let kernel_img_path = build_target_dir.join(KERNEL_IMG_NAME);
+    let target_file_path = arch_dir.join(format!("{build_target}.json"));
+
     let rustflags = format!(
-        "-C link-arg=-T{}",
-        arch_dir.join(LINKER_SCRIPT_NAME).display()
+        "-C link-arg=-T{} -Cforce-frame-pointers=yes -C symbol-mangling-version=v0",
+        arch_dir.join(LINKER_SCRIPT_NAME).display(),
     );
 
     let mut cargo_args = vec![];
@@ -72,28 +82,30 @@ fn main() -> anyhow::Result<()> {
     }
 
     cargo_args.push("--target");
-    cargo_args.push(build_target);
+    cargo_args.push(target_file_path.to_str().unwrap());
     cargo_args.push("-p");
     cargo_args.push("kernel");
-
-    let cargo_output = cmd!(sh, "cargo")
-        .args(cargo_args)
-        .env("RUSTFLAGS", &rustflags)
-        .ignore_status()
-        .output()?;
-
-    let cargo_stdout = String::from_utf8_lossy(&cargo_output.stdout);
-    let cargo_stderr = String::from_utf8_lossy(&cargo_output.stderr);
-
-    println!("{cargo_stdout}");
-
-    if !cargo_output.status.success() {
-        eprintln!("{cargo_stderr}");
-        eprintln!("Cargo command failed: {:?}", cargo_output.status);
-        std::process::exit(1);
-    }
+    cargo_args.push("-Zbuild-std=core,compiler_builtins,alloc");
+    cargo_args.push("-Zbuild-std-features=compiler-builtins-mem");
 
     if args.mode == Mode::Test {
+        let cargo_output = cmd!(sh, "cargo")
+            .args(cargo_args)
+            .env("RUSTFLAGS", &rustflags)
+            .ignore_status()
+            .output()?;
+
+        let cargo_stdout = String::from_utf8_lossy(&cargo_output.stdout);
+        let cargo_stderr = String::from_utf8_lossy(&cargo_output.stderr);
+
+        println!("{cargo_stdout}");
+
+        if !cargo_output.status.success() {
+            eprintln!("{cargo_stderr}");
+            eprintln!("Cargo command failed: {:?}", cargo_output.status);
+            std::process::exit(1);
+        }
+
         let new_kernel_elf = cargo_stderr
             .split("/deps/")
             .last()
@@ -107,7 +119,21 @@ fn main() -> anyhow::Result<()> {
             .join(new_kernel_elf)
             .display()
             .to_string();
+    } else {
+        cmd!(sh, "cargo")
+            .args(cargo_args)
+            .env("RUSTFLAGS", &rustflags)
+            .run()?;
     }
+
+    if kernel_img_path.exists() {
+        std::fs::remove_file(&kernel_img_path)?;
+    }
+
+    cmd!(sh, "truncate -s 128M {kernel_img_path}").run()?;
+    cmd!(sh, "mformat -i {kernel_img_path} ::").run()?;
+    cmd!(sh, "mmd -i {kernel_img_path} ::/EFI").run()?;
+    cmd!(sh, "mmd -i {kernel_img_path} ::/EFI/BOOT").run()?;
 
     let limine_dir = target_dir.join("limine");
     if !limine_dir.exists() {
@@ -118,18 +144,25 @@ fn main() -> anyhow::Result<()> {
         .run()?;
     }
 
-    if kernel_img_path.exists() {
-        std::fs::remove_file(&kernel_img_path)?;
+    if !std::fs::exists("u-boot")? {
+        cmd!(sh, "git clone https://github.com/u-boot/u-boot.git").run()?;
     }
 
-    cmd!(sh, "dd if=/dev/zero of={kernel_img_path} bs=1M count=128").run()?;
-    cmd!(sh, "parted {kernel_img_path} -s mklabel gpt").run()?;
-    cmd!(sh, "parted {kernel_img_path} -s mkpart ESP fat32 1MiB 100%").run()?;
-    cmd!(sh, "parted {kernel_img_path} -s set 1 esp on").run()?;
+    if !std::fs::exists("firmware")? {
+        cmd!(
+            sh,
+            "git clone --depth=1 https://github.com/raspberrypi/firmware.git"
+        )
+        .run()?;
+    }
 
-    cmd!(sh, "mformat -i {kernel_img_path} ::").run()?;
-    cmd!(sh, "mmd -i {kernel_img_path} ::/EFI").run()?;
-    cmd!(sh, "mmd -i {kernel_img_path} ::/EFI/BOOT").run()?;
+    {
+        let _uboot = sh.push_dir("u-boot");
+        cmd!(sh, "make rpi_4_defconfig").run()?;
+        let nproc = num_cpus::get().to_string();
+        cmd!(sh, "make -j{nproc} CROSS_COMPILE=aarch64-none-elf-").run()?;
+        cmd!(sh, "mcopy -i ../{kernel_img_path} u-boot.bin ::/u-boot.bin").run()?;
+    }
 
     let bootaa64 = limine_dir.join("BOOTAA64.EFI");
     cmd!(
@@ -144,62 +177,117 @@ fn main() -> anyhow::Result<()> {
     .run()?;
     cmd!(sh, "mcopy -i {kernel_img_path} limine.conf ::/limine.conf").run()?;
 
-    let qemu_drive_arg = format!(
-        "if=none,file={},format=raw,id=hd",
-        kernel_img_path.display()
-    );
+    cmd!(sh, "mcopy -i {kernel_img_path} config.txt ::/config.txt").run()?;
+
+    cmd!(
+        sh,
+        "mcopy -i {kernel_img_path} firmware/boot/start4.elf ::/start4.elf"
+    )
+    .run()?;
+    cmd!(
+        sh,
+        "mcopy -i {kernel_img_path} firmware/boot/fixup4.dat ::/fixup4.dat"
+    )
+    .run()?;
+    cmd!(
+        sh,
+        "mcopy -i {kernel_img_path} firmware/boot/bcm2711-rpi-4-b.dtb ::/bcm2711-rpi-4-b.dtb"
+    )
+    .run()?;
+
+    // cmd!(sh, "mkimage")
+    //     .arg("-d")
+    //     .arg("boot.txt")
+    //     .arg("-A")
+    //     .arg("arm64")
+    //     .arg("-O")
+    //     .arg("linux")
+    //     .arg("-T")
+    //     .arg("script")
+    //     .arg("-C")
+    //     .arg("none")
+    //     // .arg("-a")
+    //     // .arg("0x40080000")
+    //     // .arg("-e")
+    //     // .arg("0x40080000")
+    //     .arg(format!("{}/boot.scr", build_target_dir.display()))
+    //     .run()?;
+
+    // cmd!(
+    //     sh,
+    //     "mcopy -Do -i {kernel_img_path} -s {build_target_dir}/boot.scr ::boot.scr"
+    // )
+    // .run()?;
 
     if args.mode == Mode::Test {
-        let test_executable = cargo_stderr
-            .split("/deps/")
-            .last()
-            .unwrap()
-            .trim()
-            .strip_suffix(')')
-            .unwrap();
-
-        let test_executable = target_dir.join("debug").join("deps").join(test_executable);
-
         cmd!(sh, "cargo")
-            .args(["xtask", "test-runner", test_executable.to_str().unwrap()])
+            .args(["xtask", "test-runner", kernel_elf_path.as_str()])
             .run()?;
         return Ok(());
     }
 
-    let mut qemu_args = vec![
-        "-M",
-        "virt",
-        "-cpu",
-        "cortex-a72",
-        "-m",
-        "4G",
-        "-serial",
-        "mon:stdio",
-        "-semihosting",
-        "-bios",
-        "/usr/share/edk2/aarch64/QEMU_EFI.fd",
-        "-drive",
-        &qemu_drive_arg,
-        "-device",
-        "virtio-blk-device,drive=hd",
-        "-D",
-        "target/log.txt",
-        "-d",
-        "int,guest_errors",
-    ];
+    if !matches!(args.mode, Mode::Build | Mode::RaspiBuild) {
+        let qemu_drive_arg = format!(
+            "if=none,file={},format=raw,id=hd",
+            kernel_img_path.display()
+        );
+        let qemu_drive_arg_rpi = format!("if=sd,format=raw,file={}", kernel_img_path.display());
 
-    if args.mode == Mode::Debug {
-        qemu_args.push("-s");
-        qemu_args.push("-S");
-    }
+        let mut qemu_args = vec![];
 
-    if let Some(extra_args) = args.extra_qemu_args.as_ref() {
-        for arg in extra_args.split_whitespace() {
-            qemu_args.push(arg);
+        if matches!(args.mode, Mode::RaspiQemu | Mode::RaspiDebug) {
+            qemu_args.extend([
+                "-M",
+                "raspi4b",
+                "-cpu",
+                "cortex-a72",
+                "-drive",
+                &qemu_drive_arg_rpi,
+                "-kernel",
+                "u-boot/u-boot.bin",
+                "-dtb",
+                "u-boot/arch/arm/dts/bcm2711-rpi-4-b.dtb",
+            ]);
+        } else {
+            qemu_args.extend([
+                "-M",
+                "virt",
+                "-cpu",
+                "cortex-a72",
+                "-bios",
+                "/usr/share/edk2/aarch64/QEMU_EFI.fd",
+                "-drive",
+                &qemu_drive_arg,
+                "-device",
+                "virtio-blk-device,drive=hd",
+            ]);
         }
-    }
 
-    cmd!(sh, "qemu-system-aarch64").args(qemu_args).run()?;
+        qemu_args.extend([
+            "-D",
+            "target/log.txt",
+            "-d",
+            "int,guest_errors",
+            "-m",
+            "2G",
+            "-serial",
+            "mon:stdio",
+            "-semihosting",
+        ]);
+
+        if matches!(args.mode, Mode::Debug | Mode::RaspiDebug) {
+            qemu_args.push("-s");
+            qemu_args.push("-S");
+        }
+
+        if let Some(extra_args) = args.extra_qemu_args.as_ref() {
+            for arg in extra_args.split_whitespace() {
+                qemu_args.push(arg);
+            }
+        }
+
+        cmd!(sh, "qemu-system-aarch64").args(qemu_args).run()?;
+    }
 
     Ok(())
 }

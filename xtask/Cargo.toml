@@ -9,4 +9,5 @@ version = "0.1.0"
 [dependencies]
 anyhow = "*"
 clap = {version = "4.5", features = ["derive"]}
+num_cpus = "1.16.0"
 xshell = "*"

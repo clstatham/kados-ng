@@ -142,15 +142,15 @@ impl<A: FrameAllocator> Mapper<A> {
             let i = table.index_of(virt)?;
             if table.level() == 0 {
                 // log::trace!("Mapping {virt:?} => {phys:?} with {flags:?}");
-                let existing_entry = table.entry(i)?;
-                if existing_entry.raw() != 0 {
-                    log::warn!(
-                        "REMAPPING {:?} from {:?} to {:?}",
-                        virt,
-                        existing_entry.addr(),
-                        entry.addr()
-                    );
-                }
+                // let existing_entry = table.entry(i)?;
+                // if existing_entry.raw() != 0 {
+                //     log::warn!(
+                //         "REMAPPING {:?} from {:?} to {:?}",
+                //         virt,
+                //         existing_entry.addr(),
+                //         entry.addr()
+                //     );
+                // }
                 table.set_entry(i, entry)?;
                 return Ok(PageFlush::new(virt));
             } else {
