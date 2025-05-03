@@ -92,7 +92,7 @@ fn main() -> anyhow::Result<()> {
         arch_dir.join(LINKER_SCRIPT_NAME).display(),
     );
 
-    if let Mode::Flash { device, .. } = args.mode {
+    if let Mode::Flash { ref device, .. } = args.mode {
         cmd!(
             sh,
             "sudo dd if={kernel_img_path} of={device} bs=4M status=progress"

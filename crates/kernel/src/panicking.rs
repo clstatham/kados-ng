@@ -45,6 +45,11 @@ fn panic(info: &core::panic::PanicInfo) -> ! {
 
     println!("[failed]");
     println!("Panic: {}", info);
+
+    if let Err(e) = unwind_kernel_stack() {
+        println!("Error unwinding stack: {}", e);
+    }
+
     Arch::exit_qemu(1);
 }
 
@@ -102,10 +107,7 @@ pub fn unwind_kernel_stack() -> Result<(), UnwindStackError> {
 
     let symtab = symtab.ok_or(UnwindStackError::NoSymbolTable)?;
 
-    let mut fp: usize;
-    unsafe {
-        core::arch::asm!("mov {}, fp", out(reg) fp);
-    }
+    let mut fp = Arch::frame_pointer();
     let mut pc_ptr_opt = fp
         .checked_add(size_of::<usize>())
         .map(|p| p as *const usize);

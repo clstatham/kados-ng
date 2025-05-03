@@ -11,6 +11,7 @@ pub fn _print(args: fmt::Arguments) {
 macro_rules! print {
     ($($arg:tt)*) => ({
         let _ = $crate::serial::_print(format_args!($($arg)*));
+        let _ = $crate::framebuffer::_fb_print(format_args!($($arg)*));
     });
 }
 

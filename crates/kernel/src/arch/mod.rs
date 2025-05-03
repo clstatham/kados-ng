@@ -1,6 +1,3 @@
-pub mod driver;
-pub mod vectors;
-
 #[cfg(target_arch = "aarch64")]
 pub mod aarch64;
 
@@ -64,7 +61,11 @@ pub trait ArchTrait {
     unsafe fn current_page_table() -> PhysAddr;
     unsafe fn set_current_page_table(addr: PhysAddr);
 
-    unsafe fn set_stack_pointer(sp: VirtAddr, next_fn: extern "C" fn() -> !) -> !;
+    unsafe fn set_stack_pointer(sp: VirtAddr, next_fn: usize) -> !;
+
+    fn instruction_pointer() -> usize;
+    fn stack_pointer() -> usize;
+    fn frame_pointer() -> usize;
 
     fn exit_qemu(code: u32) -> !;
     fn hcf() -> !;

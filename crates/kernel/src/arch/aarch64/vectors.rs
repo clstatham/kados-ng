@@ -3,23 +3,19 @@ use aarch64_cpu::registers::*;
 use crate::{mem::units::VirtAddr, println};
 
 core::arch::global_asm!(
-    r###"
+    r#"
 .section .text.vectors
-.align 11                        // 2 KiB – required by the architecture
+.align 11                        
 .global __exception_vectors
 __exception_vectors:
 
 /* ---------- Current EL with SP_EL0 ---------- */
-    /* 0x000: Synchronous */
     b   __sync_current_el_sp0
-    .org 0x080                       // next slot – 128 B stride
-    /* 0x080: IRQ */
+    .org 0x080                       
     b   __irq_current_el_sp0
     .org 0x100
-    /* 0x100: FIQ */
     b   __fiq_current_el_sp0
     .org 0x180
-    /* 0x180: SError */
     b   __serr_current_el_sp0
 
 /* ---------- Current EL with SP_ELx ---------- */
@@ -52,9 +48,8 @@ __exception_vectors:
     .org 0x780
     b   __serr_lower_el_a32
 
-    /* Pad the remainder (0x800 total) */
     .org 0x800
-"###
+"#
 );
 
 unsafe extern "C" {

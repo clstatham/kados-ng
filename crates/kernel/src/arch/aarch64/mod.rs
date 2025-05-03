@@ -1,13 +1,15 @@
-use core::arch::asm;
+use core::{arch::asm, marker::PhantomData, ops::Deref};
+
+use aarch64_cpu::registers::*;
 
 use crate::mem::units::{PhysAddr, VirtAddr};
 
 use super::ArchTrait;
 
-pub mod mem;
 pub mod random;
 pub mod serial;
 pub mod time;
+pub mod vectors;
 
 pub struct AArch64;
 
@@ -42,9 +44,7 @@ impl ArchTrait for AArch64 {
     const PAGE_FLAG_NON_GLOBAL: usize = 1 << 11;
 
     unsafe fn init_mem() {
-        unsafe {
-            mem::init();
-        }
+        MAIR_EL1.set((0x44 << 8) | 0xff); // NORMAL_UNCACHED_MEMORY, NORMAL_WRITEBACK_MEMORY
     }
 
     unsafe fn init_interrupts() {
@@ -53,6 +53,7 @@ impl ArchTrait for AArch64 {
         }
     }
 
+    #[inline(always)]
     unsafe fn enable_interrupts() {
         unsafe {
             asm!(
@@ -63,6 +64,7 @@ impl ArchTrait for AArch64 {
         }
     }
 
+    #[inline(always)]
     unsafe fn disable_interrupts() {
         unsafe { asm!("msr daifset, #0b1111") }
     }
@@ -71,6 +73,7 @@ impl ArchTrait for AArch64 {
         todo!()
     }
 
+    #[inline(always)]
     unsafe fn invalidate_page(addr: VirtAddr) {
         unsafe {
             asm!("
@@ -82,6 +85,7 @@ impl ArchTrait for AArch64 {
         }
     }
 
+    #[inline(always)]
     unsafe fn invalidate_all() {
         unsafe {
             asm!("dsb ishst");
@@ -91,6 +95,7 @@ impl ArchTrait for AArch64 {
         }
     }
 
+    #[inline(always)]
     unsafe fn current_page_table() -> PhysAddr {
         let addr: usize;
         unsafe {
@@ -99,6 +104,7 @@ impl ArchTrait for AArch64 {
         PhysAddr::new_canonical(addr)
     }
 
+    #[inline(always)]
     unsafe fn set_current_page_table(addr: PhysAddr) {
         unsafe {
             asm!("dsb ishst");
@@ -108,7 +114,8 @@ impl ArchTrait for AArch64 {
         }
     }
 
-    unsafe fn set_stack_pointer(sp: VirtAddr, next_fn: extern "C" fn() -> !) -> ! {
+    #[inline(always)]
+    unsafe fn set_stack_pointer(sp: VirtAddr, next_fn: usize) -> ! {
         unsafe {
             core::arch::asm!(
                 "msr SPSel, #1",
@@ -121,6 +128,33 @@ impl ArchTrait for AArch64 {
         }
     }
 
+    #[inline(always)]
+    fn instruction_pointer() -> usize {
+        let pc: usize;
+        unsafe {
+            core::arch::asm!("mov {}, pc", out(reg) pc);
+        }
+        pc
+    }
+
+    #[inline(always)]
+    fn stack_pointer() -> usize {
+        let sp: usize;
+        unsafe {
+            core::arch::asm!("mov {}, sp", out(reg) sp);
+        }
+        sp
+    }
+
+    #[inline(always)]
+    fn frame_pointer() -> usize {
+        let fp: usize;
+        unsafe {
+            core::arch::asm!("mov {}, fp", out(reg) fp);
+        }
+        fp
+    }
+
     fn exit_qemu(code: u32) -> ! {
         use qemu_exit::QEMUExit;
         qemu_exit::AArch64::new().exit(code)
@@ -130,7 +164,31 @@ impl ArchTrait for AArch64 {
         loop {
             unsafe {
                 asm!("wfe");
+                asm!("nop");
             }
         }
+    }
+}
+
+#[repr(transparent)]
+pub struct MmioDeref<T> {
+    start_addr: usize,
+    _marker: PhantomData<fn() -> T>,
+}
+
+impl<T> MmioDeref<T> {
+    pub const unsafe fn new(start_addr: usize) -> Self {
+        Self {
+            start_addr,
+            _marker: PhantomData,
+        }
+    }
+}
+
+impl<T> Deref for MmioDeref<T> {
+    type Target = T;
+
+    fn deref(&self) -> &Self::Target {
+        unsafe { &*(self.start_addr as *const T) }
     }
 }

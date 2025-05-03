@@ -16,7 +16,7 @@ pub mod allocator;
 pub mod mapper;
 pub mod table;
 
-pub static MEM_MAP_ENTRIES: Once<MemMapEntries<32>> = Once::new();
+pub static MEM_MAP_ENTRIES: Once<MemMapEntries<64>> = Once::new();
 
 #[derive(Clone, Copy)]
 pub struct MemMapEntry {
@@ -146,7 +146,7 @@ pub unsafe fn map_memory() -> ! {
 
         Arch::set_stack_pointer(
             VirtAddr::new_canonical(stack_top),
-            crate::kernel_main_post_paging,
+            crate::kernel_main_post_paging as *const () as usize,
         )
     }
 }

@@ -210,6 +210,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "embedded-hal"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "361a90feb7004eca4019fb28352a9465666b24f840f5c3cddf0ff13920590b89"
+
+[[package]]
+name = "embedded-io"
+version = "0.6.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "edd0f118536f44f5ccd48bcb8b111bdc3de888b58c74639dfb034a357d0f206d"
+
+[[package]]
 name = "float-cmp"
 version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -245,6 +257,8 @@ dependencies = [
  "buddy_system_allocator",
  "derive_more",
  "embedded-graphics",
+ "embedded-hal",
+ "embedded-io",
  "limine",
  "log",
  "qemu-exit",
@@ -253,6 +267,7 @@ dependencies = [
  "rustc-demangle",
  "spin 0.10.0",
  "thiserror",
+ "tock-registers 0.9.0",
  "uuid",
  "xmas-elf",
 ]
