@@ -6,17 +6,28 @@ use xshell::{Shell, cmd};
 #[derive(Subcommand, Clone, Debug, PartialEq, Eq)]
 enum Mode {
     /// Build the kernel for a Raspberry Pi 4b
-    Build,
+    Build {
+        #[clap(short, long, default_value_t = false)]
+        release: bool,
+    },
     /// Build the kernel for a Raspberry Pi 4b and emulate it in QEMU
-    Run,
+    Run {
+        #[clap(short, long, default_value_t = false)]
+        release: bool,
+    },
     /// Build the kernel for a Raspberry Pi 4b and run it in QEMU with debug options (gdbserver)
-    Debug,
+    Debug {
+        #[clap(short, long, default_value_t = false)]
+        release: bool,
+    },
     /// Build the kernel for a Raspberry Pi 4b and run tests in QEMU
     Test,
     /// Flash the built image to an SD card for the Raspberry Pi
     Flash {
         /// Device to flash to (e.g. /dev/sdb)
         device: String,
+        #[clap(short, long, default_value_t = false)]
+        release: bool,
     },
     /// Internal mode used by the test runner
     #[clap(hide = true)]
@@ -56,9 +67,19 @@ fn main() -> anyhow::Result<()> {
     let args = Args::parse();
     let sh = Shell::new()?;
 
+    let release_mode = if let Mode::Build { release }
+    | Mode::Flash { release, .. }
+    | Mode::Run { release }
+    | Mode::Debug { release } = args.mode
+    {
+        release
+    } else {
+        false
+    };
+
     let build_target = "aarch64-kados";
     let target_dir = PathBuf::from(format!("target/{build_target}"));
-    let build_target_dir = target_dir.join("debug");
+    let build_target_dir = target_dir.join(if release_mode { "release" } else { "debug" });
     let arch_dir = PathBuf::from("arch/aarch64");
     let mut kernel_elf_path = args
         .kernel_path()
@@ -71,10 +92,10 @@ fn main() -> anyhow::Result<()> {
         arch_dir.join(LINKER_SCRIPT_NAME).display(),
     );
 
-    if let Mode::Flash { device } = args.mode {
+    if let Mode::Flash { device, .. } = args.mode {
         cmd!(
             sh,
-            "sudo dd if=target/aarch64-kados/debug/kados.img of={device} bs=4M status=progress"
+            "sudo dd if={kernel_img_path} of={device} bs=4M status=progress"
         )
         .run()?;
         cmd!(sh, "sync").run()?;
@@ -96,6 +117,10 @@ fn main() -> anyhow::Result<()> {
     cargo_args.push("kernel");
     cargo_args.push("-Zbuild-std=core,compiler_builtins,alloc");
     cargo_args.push("-Zbuild-std-features=compiler-builtins-mem");
+
+    if release_mode {
+        cargo_args.push("--release");
+    }
 
     if args.mode == Mode::Test {
         let cargo_output = cmd!(sh, "cargo")
@@ -211,7 +236,7 @@ fn main() -> anyhow::Result<()> {
         return Ok(());
     }
 
-    if !matches!(args.mode, Mode::Build) {
+    if !matches!(args.mode, Mode::Build { .. }) {
         let qemu_drive_arg_rpi = format!("if=sd,format=raw,file={}", kernel_img_path.display());
 
         let mut qemu_args = vec![];
@@ -234,11 +259,11 @@ fn main() -> anyhow::Result<()> {
             "-m",
             "2G",
             "-serial",
-            "mon:stdio",
+            "stdio",
             "-semihosting",
         ]);
 
-        if matches!(args.mode, Mode::Debug) {
+        if matches!(args.mode, Mode::Debug { .. }) {
             qemu_args.push("-s");
             qemu_args.push("-S");
         }

@@ -88,15 +88,10 @@ pub extern "C" fn kernel_main() -> ! {
 
     let boot_time = BOOT_TIME.get_response().unwrap();
 
+    arch::serial::init();
+
     unsafe {
         arch::time::init(boot_time.timestamp());
-    }
-
-    arch::driver::register_driver(&serial::UartDriver, "PL011 UART")
-        .expect("Failed to register UART driver");
-
-    unsafe {
-        arch::driver::init_drivers().expect("Failed to initialize drivers");
     }
 
     logging::init();
@@ -202,7 +197,7 @@ pub extern "C" fn kernel_main_post_paging() -> ! {
     log::info!("Initializing framebuffer");
     framebuffer::init(*FRAMEBUFFER_INFO.get().unwrap());
 
-    log::info!("Kernel boot finished at {}", arch::time::Instant::now());
+    log::info!("Kernel boot finished after {:?}", arch::time::uptime());
 
     #[cfg(test)]
     test_main();

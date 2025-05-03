@@ -3,8 +3,6 @@ use core::fmt::{self, Write};
 use arm_pl011::Pl011Uart;
 use spin::{Once, mutex::SpinMutex};
 
-use crate::arch::driver::Driver;
-
 // const PL011_BASE: *mut u8 = 0x0900_0000 as *mut u8; // Base address of PL011 UART
 const PL011_BASE: *mut u8 = 0xFE201000 as *mut u8; // RPi4
 
@@ -27,17 +25,8 @@ pub fn write_fmt(args: fmt::Arguments) {
     }
 }
 
-pub struct UartDriver;
-
-impl Driver for UartDriver {
-    fn name(&self) -> &'static str {
-        "PL011 UART"
-    }
-
-    unsafe fn init(&self) -> Result<(), &'static str> {
-        let mut uart = Pl011Uart::new(PL011_BASE);
-        uart.init();
-        UART.call_once(|| SpinMutex::new(Uart(uart)));
-        Ok(())
-    }
+pub fn init() {
+    let mut uart = Pl011Uart::new(PL011_BASE);
+    uart.init();
+    UART.call_once(|| SpinMutex::new(Uart(uart)));
 }

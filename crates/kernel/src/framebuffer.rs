@@ -1,10 +1,10 @@
 use core::ops::Add;
 
-use alloc::{boxed::Box, vec::Vec};
+use alloc::boxed::Box;
 use embedded_graphics::{
     mono_font::{MonoFont, MonoTextStyle, ascii},
     prelude::*,
-    text::{Alignment, Text},
+    text::Text,
 };
 use spin::{
     Once,
@@ -38,14 +38,13 @@ impl FbChar {
 
     pub fn to_text(&self, top_left: Point, x: usize, y: usize) -> Text<MonoTextStyle<Rgb888>> {
         Text::new(
-            core::str::from_utf8(core::slice::from_ref(&self.char)).unwrap_or_default(),
+            core::str::from_utf8(core::slice::from_ref(&self.char)).unwrap_or(" "),
             top_left
                 + Point::new(
                     FONT.character_size.width as i32 * (x as i32 + 1),
                     FONT.character_size.height as i32 * (y as i32 + 1),
                 ),
             MonoTextStyle::new(&FONT, self.fg),
-            // Alignment::Left,
         )
     }
 }
