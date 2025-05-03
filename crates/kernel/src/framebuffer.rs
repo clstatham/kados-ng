@@ -2,8 +2,7 @@ use core::ops::Add;
 
 use alloc::{boxed::Box, vec::Vec};
 use embedded_graphics::{
-    mono_font::{MonoFont, MonoTextStyle, ascii::FONT_10X20},
-    pixelcolor::Rgb888,
+    mono_font::{MonoFont, MonoTextStyle, ascii},
     prelude::*,
     text::{Alignment, Text},
 };
@@ -12,12 +11,44 @@ use spin::{
     mutex::{SpinMutex, SpinMutexGuard},
 };
 
+pub use embedded_graphics::pixelcolor::Rgb888;
+
 use crate::mem::units::VirtAddr;
 
-const FONT: MonoFont = FONT_10X20;
+const FONT: MonoFont = ascii::FONT_8X13;
 
-const BUFFER_WIDTH: usize = 160;
-const BUFFER_HEIGHT: usize = 50;
+pub const TEXT_BUFFER_WIDTH: usize = 80;
+pub const TEXT_BUFFER_HEIGHT: usize = 25;
+
+#[derive(Clone, Copy)]
+pub struct FbChar {
+    char: u8,
+    fg: Rgb888,
+}
+
+impl FbChar {
+    pub const DEFAULT: Self = Self {
+        char: b' ',
+        fg: Rgb888::BLACK,
+    };
+
+    pub fn new(char: u8, fg: Rgb888) -> Self {
+        Self { char, fg }
+    }
+
+    pub fn to_text(&self, top_left: Point, x: usize, y: usize) -> Text<MonoTextStyle<Rgb888>> {
+        Text::new(
+            core::str::from_utf8(core::slice::from_ref(&self.char)).unwrap_or_default(),
+            top_left
+                + Point::new(
+                    FONT.character_size.width as i32 * (x as i32 + 1),
+                    FONT.character_size.height as i32 * (y as i32 + 1),
+                ),
+            MonoTextStyle::new(&FONT, self.fg),
+            // Alignment::Left,
+        )
+    }
+}
 
 pub struct FrameBuffer {
     back_buffer: Box<[u32]>,
@@ -25,7 +56,7 @@ pub struct FrameBuffer {
     width: usize,
     height: usize,
     bpp: usize,
-    text_buf: [[Option<u8>; BUFFER_WIDTH]; BUFFER_HEIGHT],
+    text_buf: Box<[[Option<FbChar>; TEXT_BUFFER_WIDTH]; TEXT_BUFFER_HEIGHT]>,
     text_cursor_x: usize,
     text_cursor_y: usize,
     text_fgcolor: Rgb888,
@@ -44,37 +75,28 @@ impl FrameBuffer {
         self.bpp
     }
 
+    pub fn set_text_fgcolor(&mut self, color: Rgb888) {
+        self.text_fgcolor = color;
+    }
+
+    pub fn set_text_fgcolor_default(&mut self) {
+        self.text_fgcolor = Rgb888::WHITE;
+    }
+
     pub fn render_text_buf(&mut self) {
-        let mut out = Vec::new();
-        for line in 0..BUFFER_HEIGHT {
-            'inner: for col in 0..BUFFER_WIDTH {
+        for line in 0..TEXT_BUFFER_HEIGHT {
+            for col in 0..TEXT_BUFFER_WIDTH {
                 if let Some(ch) = self.text_buf[line][col] {
-                    out.push(ch);
-                } else {
-                    out.push(b'\n');
-                    break 'inner;
+                    ch.to_text(self.bounding_box().top_left, col, line)
+                        .draw(self)
+                        .unwrap();
                 }
             }
         }
-
-        let mono_font = MonoTextStyle::new(&FONT, self.text_fgcolor);
-
-        Text::with_alignment(
-            core::str::from_utf8(&out).unwrap(),
-            self.bounding_box().top_left
-                + Point::new(
-                    FONT.character_size.width as i32,
-                    FONT.character_size.height as i32,
-                ),
-            mono_font,
-            Alignment::Left,
-        )
-        .draw(self)
-        .unwrap();
     }
 
     pub fn clear_pixels(&mut self) {
-        self.clear(Rgb888::new(0, 0, 0)).unwrap();
+        self.clear(Rgb888::BLACK).unwrap();
     }
 
     pub fn frame_mut(&mut self) -> &mut [u32] {
@@ -95,14 +117,17 @@ impl FrameBuffer {
             b'\n' => self.new_line(),
             b'\r' => self.text_cursor_x = 0,
             byte => {
-                if self.text_cursor_x >= BUFFER_WIDTH - 1 {
+                if self.text_cursor_x >= TEXT_BUFFER_WIDTH - 1 {
                     self.new_line();
                 }
 
                 let row = self.text_cursor_y;
                 let col = self.text_cursor_x;
 
-                self.text_buf[row][col] = Some(byte);
+                self.text_buf[row][col] = Some(FbChar {
+                    char: byte,
+                    fg: self.text_fgcolor,
+                });
                 self.move_right();
             }
         }
@@ -125,15 +150,15 @@ impl FrameBuffer {
         }
     }
 
-    fn new_line(&mut self) {
-        if self.text_cursor_y >= BUFFER_HEIGHT - 1 {
-            for row in 1..BUFFER_HEIGHT {
-                for col in 0..BUFFER_WIDTH {
+    pub fn new_line(&mut self) {
+        if self.text_cursor_y >= TEXT_BUFFER_HEIGHT - 1 {
+            for row in 1..TEXT_BUFFER_HEIGHT {
+                for col in 0..TEXT_BUFFER_WIDTH {
                     let character = self.text_buf[row][col];
                     self.text_buf[row - 1][col] = character;
                 }
             }
-            self.text_cursor_y = BUFFER_HEIGHT - 1;
+            self.text_cursor_y = TEXT_BUFFER_HEIGHT - 1;
             self.clear_row(self.text_cursor_y);
             self.text_cursor_x = 0;
         } else {
@@ -143,22 +168,22 @@ impl FrameBuffer {
         self.cursor_color_hook();
     }
 
-    fn clear_row(&mut self, row: usize) {
-        for col in 0..BUFFER_WIDTH {
+    pub fn clear_row(&mut self, row: usize) {
+        for col in 0..TEXT_BUFFER_WIDTH {
             self.text_buf[row][col] = None;
         }
         self.cursor_color_hook();
     }
-    fn clear_until_end(&mut self) {
-        for col in self.text_cursor_x..BUFFER_WIDTH {
+    pub fn clear_until_end(&mut self) {
+        for col in self.text_cursor_x..TEXT_BUFFER_WIDTH {
             self.text_buf[self.text_cursor_y][col] = None;
         }
-        for row in self.text_cursor_y + 1..BUFFER_HEIGHT {
+        for row in self.text_cursor_y + 1..TEXT_BUFFER_HEIGHT {
             self.clear_row(row);
         }
         self.cursor_color_hook();
     }
-    fn clear_until_beginning(&mut self) {
+    pub fn clear_until_beginning(&mut self) {
         for col in 0..self.text_cursor_x {
             self.text_buf[self.text_cursor_y][col] = None;
         }
@@ -167,53 +192,43 @@ impl FrameBuffer {
         }
         self.cursor_color_hook();
     }
-    fn clear_until_eol(&mut self) {
-        for col in self.text_cursor_x..BUFFER_WIDTH {
+    pub fn clear_until_eol(&mut self) {
+        for col in self.text_cursor_x..TEXT_BUFFER_WIDTH {
             self.text_buf[self.text_cursor_y][col] = None;
         }
         self.cursor_color_hook();
     }
-    fn clear_from_bol(&mut self) {
+    pub fn clear_from_bol(&mut self) {
         for col in 0..self.text_cursor_x {
             self.text_buf[self.text_cursor_y][col] = None;
         }
         self.cursor_color_hook();
     }
-    fn clear_line(&mut self) {
+    pub fn clear_line(&mut self) {
         self.clear_row(self.text_cursor_y);
     }
-    fn clear_all(&mut self) {
-        for row in 0..BUFFER_HEIGHT {
+    pub fn clear_all(&mut self) {
+        for row in 0..TEXT_BUFFER_HEIGHT {
             self.clear_row(row)
         }
         self.cursor_color_hook();
     }
-    fn move_up(&mut self) {
+    pub fn move_up(&mut self) {
         let new_y = self.text_cursor_y.saturating_sub(1);
-        // let mut new_x = self.text_cursor_x;
-        // while new_x > 0 && self.text_buf[new_y][new_x] == b' ' {
-        // new_x -= 1;
-        // }
         self.text_cursor_y = new_y;
-        // self.text_cursor_x = new_x;
         self.cursor_color_hook();
     }
-    fn move_down(&mut self) {
-        let new_y = self.text_cursor_y.add(1).min(BUFFER_HEIGHT - 1);
-        // let mut new_x = self.text_cursor_x;
-        // while new_x > 0 && self.text_buf[new_y][new_x] == b' ' {
-        //     new_x -= 1;
-        // }
+    pub fn move_down(&mut self) {
+        let new_y = self.text_cursor_y.add(1).min(TEXT_BUFFER_HEIGHT - 1);
         self.text_cursor_y = new_y;
-        // self.text_cursor_x = new_x;
         self.cursor_color_hook();
     }
-    fn move_left(&mut self) {
+    pub fn move_left(&mut self) {
         self.text_cursor_x = self.text_cursor_x.saturating_sub(1);
         self.cursor_color_hook();
     }
-    fn move_right(&mut self) {
-        self.text_cursor_x = self.text_cursor_x.add(1).min(BUFFER_WIDTH - 1);
+    pub fn move_right(&mut self) {
+        self.text_cursor_x = self.text_cursor_x.add(1).min(TEXT_BUFFER_WIDTH - 1);
         self.cursor_color_hook();
     }
 }
@@ -262,72 +277,6 @@ pub fn fb<'a>() -> SpinMutexGuard<'a, FrameBuffer> {
     FRAMEBUFFER.get().unwrap().lock()
 }
 
-pub fn clear_screen() {
-    fb().clear_all()
-}
-
-pub fn backspace() {
-    fb().backspace()
-}
-
-pub fn set_cursor_x(x: usize) {
-    fb().text_cursor_x = x.min(BUFFER_WIDTH - 1);
-}
-
-pub fn set_cursor_y(y: usize) {
-    fb().text_cursor_y = y.min(BUFFER_HEIGHT - 1);
-}
-
-pub fn set_cursor_xy(xy: (usize, usize)) {
-    set_cursor_x(xy.0.min(BUFFER_WIDTH - 1));
-    set_cursor_y(xy.1.min(BUFFER_HEIGHT - 1));
-}
-
-pub fn cursor_xy() -> (usize, usize) {
-    let fb = fb();
-    (fb.text_cursor_x, fb.text_cursor_y)
-}
-
-pub fn write_byte(byte: u8) {
-    fb().write_byte(byte);
-}
-
-pub fn clear_until_end() {
-    fb().clear_until_end();
-}
-
-pub fn clear_until_beginning() {
-    fb().clear_until_beginning();
-}
-
-pub fn clear_from_bol() {
-    fb().clear_from_bol();
-}
-
-pub fn clear_until_eol() {
-    fb().clear_until_eol();
-}
-
-pub fn clear_line() {
-    fb().clear_line();
-}
-
-pub fn move_up() {
-    fb().move_up();
-}
-
-pub fn move_down() {
-    fb().move_down();
-}
-
-pub fn move_left() {
-    fb().move_left();
-}
-
-pub fn move_right() {
-    fb().move_right();
-}
-
 pub fn render_text_buf() {
     fb().clear_pixels();
     fb().render_text_buf();
@@ -338,7 +287,6 @@ pub fn render_text_buf() {
 macro_rules! fb_print {
     ($($arg:tt)*) => ({
         $crate::framebuffer::_fb_print(format_args!($($arg)*));
-        // $crate::serial::_print(format_args!($($arg)*));
     });
 }
 
@@ -374,12 +322,12 @@ pub fn init(fb_tag: FramebufferInfo) {
     } = fb_tag;
     log::debug!("FB addr: {base:#x}");
     let framebuf = FrameBuffer {
-        back_buffer: alloc::vec![0u32; width* height].into_boxed_slice(),
+        back_buffer: alloc::vec![0u32; width * height].into_boxed_slice(),
         start_addr: VirtAddr::new_canonical(base),
         width,
         height,
         bpp,
-        text_buf: [[None; BUFFER_WIDTH]; BUFFER_HEIGHT],
+        text_buf: Box::new([[None; TEXT_BUFFER_WIDTH]; TEXT_BUFFER_HEIGHT]),
         text_cursor_x: 0,
         text_cursor_y: 0,
         text_fgcolor: Rgb888::WHITE,
@@ -388,5 +336,8 @@ pub fn init(fb_tag: FramebufferInfo) {
     FRAMEBUFFER.call_once(|| SpinMutex::new(framebuf));
 
     fb().clear_pixels();
-    clear_screen();
+    fb().clear_all();
+
+    log::info!("Framebuffer resolution:");
+    log::info!("{width}x{height}");
 }

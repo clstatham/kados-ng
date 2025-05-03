@@ -1,4 +1,12 @@
+use core::fmt::Write;
+
+use embedded_graphics::{
+    pixelcolor::Rgb888,
+    prelude::{RgbColor, WebColors},
+};
 pub use log::*;
+
+use crate::framebuffer::{FRAMEBUFFER, render_text_buf};
 
 pub struct Logger;
 
@@ -31,6 +39,7 @@ impl Log for Logger {
             log::Level::Trace => "\x1b[37m", // White
         };
         let reset = "\x1b[0m"; // Reset color
+        let target = record.target().split("::").last().unwrap_or("");
         crate::serial::write_fmt(format_args!(
             "{}[{}]{} [{}.{:09}] [{}] {}\n",
             color,
@@ -38,17 +47,35 @@ impl Log for Logger {
             reset,
             uptime_secs,
             uptime_subsec_nanos,
-            record.target().split("::").last().unwrap_or(""),
+            target,
             record.args(),
         ));
-        crate::framebuffer::_fb_print(format_args!(
-            "[{}] [{}.{:09}] [{}] {}\n",
-            level_str,
-            uptime_secs,
-            uptime_subsec_nanos,
-            record.target().split("::").last().unwrap_or(""),
-            record.args(),
-        ));
+
+        if let Some(fb) = FRAMEBUFFER.get() {
+            let mut fb = fb.lock();
+            fb.set_text_fgcolor_default();
+            fb.write_fmt(format_args!("[")).ok();
+            let color = match level {
+                log::Level::Error => Rgb888::RED,
+                log::Level::Warn => Rgb888::YELLOW,
+                log::Level::Info => Rgb888::GREEN,
+                log::Level::Debug => Rgb888::BLUE,
+                log::Level::Trace => Rgb888::CSS_LIGHT_GRAY,
+            };
+            fb.set_text_fgcolor(color);
+            fb.write_fmt(format_args!("{level_str}")).ok();
+            fb.set_text_fgcolor_default();
+            fb.write_fmt(format_args!(
+                "] [{}.{:09}] [{}] {}\n",
+                uptime_secs,
+                uptime_subsec_nanos,
+                target,
+                record.args()
+            ))
+            .ok();
+            drop(fb);
+            render_text_buf();
+        }
     }
 }
 

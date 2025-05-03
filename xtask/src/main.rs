@@ -1,26 +1,20 @@
 use std::path::PathBuf;
 
-use clap::Parser;
+use clap::{Parser, Subcommand};
 use xshell::{Shell, cmd};
 
-#[derive(clap::Subcommand, Clone, Debug, PartialEq, Eq)]
+#[derive(Subcommand, Clone, Debug, PartialEq, Eq)]
 enum Mode {
-    /// Build the kernel
-    Build,
-    /// Build the kernel and run it in QEMU
-    Run,
-    /// Build the kernel and run it in QEMU with debug options (gdbserver)
-    Debug,
-    /// Build the kernel and run the tests in QEMU
-    Test,
     /// Build the kernel for a Raspberry Pi 4b
-    RaspiBuild,
+    Build,
     /// Build the kernel for a Raspberry Pi 4b and emulate it in QEMU
-    RaspiQemu,
+    Run,
     /// Build the kernel for a Raspberry Pi 4b and run it in QEMU with debug options (gdbserver)
-    RaspiDebug,
+    Debug,
+    /// Build the kernel for a Raspberry Pi 4b and run tests in QEMU
+    Test,
     /// Flash the built image to an SD card for the Raspberry Pi
-    RaspiFlash {
+    Flash {
         /// Device to flash to (e.g. /dev/sdb)
         device: String,
     },
@@ -77,7 +71,7 @@ fn main() -> anyhow::Result<()> {
         arch_dir.join(LINKER_SCRIPT_NAME).display(),
     );
 
-    if let Mode::RaspiFlash { device } = args.mode {
+    if let Mode::Flash { device } = args.mode {
         cmd!(
             sh,
             "sudo dd if=target/aarch64-kados/debug/kados.img of={device} bs=4M status=progress"
@@ -210,30 +204,6 @@ fn main() -> anyhow::Result<()> {
     )
     .run()?;
 
-    // cmd!(sh, "mkimage")
-    //     .arg("-d")
-    //     .arg("boot.txt")
-    //     .arg("-A")
-    //     .arg("arm64")
-    //     .arg("-O")
-    //     .arg("linux")
-    //     .arg("-T")
-    //     .arg("script")
-    //     .arg("-C")
-    //     .arg("none")
-    //     // .arg("-a")
-    //     // .arg("0x40080000")
-    //     // .arg("-e")
-    //     // .arg("0x40080000")
-    //     .arg(format!("{}/boot.scr", build_target_dir.display()))
-    //     .run()?;
-
-    // cmd!(
-    //     sh,
-    //     "mcopy -Do -i {kernel_img_path} -s {build_target_dir}/boot.scr ::boot.scr"
-    // )
-    // .run()?;
-
     if args.mode == Mode::Test {
         cmd!(sh, "cargo")
             .args(["xtask", "test-runner", kernel_elf_path.as_str()])
@@ -241,39 +211,22 @@ fn main() -> anyhow::Result<()> {
         return Ok(());
     }
 
-    if !matches!(args.mode, Mode::Build | Mode::RaspiBuild) {
-        let qemu_drive_arg = format!("if=none,file={},format=raw", kernel_img_path.display());
+    if !matches!(args.mode, Mode::Build) {
         let qemu_drive_arg_rpi = format!("if=sd,format=raw,file={}", kernel_img_path.display());
 
         let mut qemu_args = vec![];
 
-        if matches!(args.mode, Mode::RaspiQemu | Mode::RaspiDebug) {
-            qemu_args.extend([
-                "-M",
-                "raspi4b",
-                "-cpu",
-                "cortex-a72",
-                "-drive",
-                &qemu_drive_arg_rpi,
-                "-kernel",
-                "u-boot/u-boot.bin",
-                "-dtb",
-                "u-boot/arch/arm/dts/bcm2711-rpi-4-b.dtb",
-            ]);
-        } else {
-            qemu_args.extend([
-                "-M",
-                "virt",
-                "-cpu",
-                "cortex-a72",
-                "-kernel",
-                "u-boot/u-boot.bin",
-                "-drive",
-                &qemu_drive_arg,
-            ]);
-        }
-
         qemu_args.extend([
+            "-M",
+            "raspi4b",
+            "-cpu",
+            "cortex-a72",
+            "-drive",
+            &qemu_drive_arg_rpi,
+            "-kernel",
+            "u-boot/u-boot.bin",
+            "-dtb",
+            "u-boot/arch/arm/dts/bcm2711-rpi-4-b.dtb",
             "-D",
             "target/log.txt",
             "-d",
@@ -285,7 +238,7 @@ fn main() -> anyhow::Result<()> {
             "-semihosting",
         ]);
 
-        if matches!(args.mode, Mode::Debug | Mode::RaspiDebug) {
+        if matches!(args.mode, Mode::Debug) {
             qemu_args.push("-s");
             qemu_args.push("-S");
         }
