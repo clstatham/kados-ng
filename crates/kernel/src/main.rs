@@ -1,6 +1,10 @@
 #![no_std]
 #![no_main]
-#![allow(clippy::missing_safety_doc, clippy::new_without_default)]
+#![allow(
+    clippy::missing_safety_doc,
+    clippy::new_without_default,
+    clippy::uninlined_format_args
+)]
 
 use core::sync::atomic::Ordering;
 
@@ -30,6 +34,7 @@ pub mod serial;
 pub mod framebuffer;
 pub mod mem;
 pub mod panicking;
+pub mod sync;
 
 static HHDM: HhdmRequest = HhdmRequest::new();
 static _ENTRY_POINT: EntryPointRequest = EntryPointRequest::new().with_entry_point(kernel_main);
@@ -74,8 +79,14 @@ elf_offsets!(
 
 #[unsafe(no_mangle)]
 pub extern "C" fn kernel_main() -> ! {
+    unsafe { Arch::disable_interrupts() };
+
     let hhdm = HHDM.get_response().unwrap();
     mem::HHDM_PHYSICAL_OFFSET.store(hhdm.offset() as usize, Ordering::SeqCst);
+
+    unsafe {
+        Arch::pre_kernel_main_init();
+    }
 
     let boot_time = BOOT_TIME.get_response().unwrap();
 
@@ -161,7 +172,7 @@ pub extern "C" fn kernel_main() -> ! {
     add_kernel_frames(MEM_MAP_ENTRIES.get().unwrap().usable_entries());
 
     unsafe {
-        log::info!("Mapping memory");
+        log::info!("Initializing memory");
         mem::paging::map_memory()
     }
 }
@@ -183,6 +194,12 @@ pub extern "C" fn kernel_main_post_paging() -> ! {
 
     unsafe {
         mem::heap::init_heap().expect("Error initializing heap");
+    }
+
+    log::info!("Initializing memory (post-heap)");
+
+    unsafe {
+        Arch::post_heap_init();
     }
 
     log::info!("Initializing framebuffer");

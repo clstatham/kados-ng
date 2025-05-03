@@ -162,11 +162,7 @@ impl PageFlags {
     }
 
     pub fn new_table() -> Self {
-        Self(
-            Arch::PAGE_FLAG_TABLE_DEFAULTS
-                | Arch::PAGE_FLAG_NON_EXECUTABLE
-                | Arch::PAGE_FLAG_NON_GLOBAL,
-        )
+        Self(Arch::PAGE_FLAG_TABLE_DEFAULTS | Arch::PAGE_FLAG_NON_GLOBAL)
     }
 
     pub fn new_for_text_segment() -> Self {

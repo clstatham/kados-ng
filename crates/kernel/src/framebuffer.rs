@@ -206,7 +206,7 @@ impl FrameBuffer {
     pub fn clear_line(&mut self) {
         self.clear_row(self.text_cursor_y);
     }
-    pub fn clear_all(&mut self) {
+    pub fn clear_text(&mut self) {
         for row in 0..TEXT_BUFFER_HEIGHT {
             self.clear_row(row)
         }
@@ -319,7 +319,7 @@ pub fn init(fb_tag: FramebufferInfo) {
         height,
         bpp,
     } = fb_tag;
-    log::debug!("FB addr: {base:#x}");
+
     let framebuf = FrameBuffer {
         back_buffer: alloc::vec![0u32; width * height].into_boxed_slice(),
         start_addr: VirtAddr::new_canonical(base),
@@ -334,9 +334,9 @@ pub fn init(fb_tag: FramebufferInfo) {
 
     FRAMEBUFFER.call_once(|| SpinMutex::new(framebuf));
 
+    fb().set_text_fgcolor_default();
     fb().clear_pixels();
-    fb().clear_all();
+    fb().clear_text();
 
-    log::info!("Framebuffer resolution:");
-    log::info!("{width}x{height}");
+    log::info!("Framebuffer resolution: {width}x{height}");
 }

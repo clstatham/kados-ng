@@ -1,10 +1,16 @@
 #[cfg(target_arch = "aarch64")]
 pub mod aarch64;
-
 #[cfg(target_arch = "aarch64")]
 pub use self::aarch64::AArch64 as Arch;
 #[cfg(target_arch = "aarch64")]
 pub use self::aarch64::*;
+
+#[cfg(target_arch = "x86_64")]
+pub mod x86_64;
+#[cfg(target_arch = "x86_64")]
+pub use self::x86_64::X86_64 as Arch;
+#[cfg(target_arch = "x86_64")]
+pub use self::x86_64::*;
 
 use crate::mem::units::{PhysAddr, VirtAddr};
 
@@ -40,7 +46,9 @@ pub trait ArchTrait {
     const PAGE_ENTRY_FLAGS_MASK: usize =
         !(Self::PAGE_ENTRY_ADDR_MASK << Self::PAGE_ENTRY_ADDR_SHIFT);
 
+    unsafe fn pre_kernel_main_init();
     unsafe fn init_mem();
+    unsafe fn post_heap_init();
     unsafe fn init_interrupts();
     unsafe fn enable_interrupts();
     unsafe fn disable_interrupts();
