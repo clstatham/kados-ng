@@ -1,9 +1,6 @@
 #![no_std]
 #![no_main]
 #![allow(clippy::missing_safety_doc, clippy::new_without_default)]
-#![feature(test, custom_test_frameworks)]
-#![test_runner(crate::testing::test_runner)]
-#![reexport_test_harness_main = "test_main"]
 
 use core::sync::atomic::Ordering;
 
@@ -33,8 +30,6 @@ pub mod serial;
 pub mod framebuffer;
 pub mod mem;
 pub mod panicking;
-#[cfg(test)]
-pub mod testing;
 
 static HHDM: HhdmRequest = HhdmRequest::new();
 static _ENTRY_POINT: EntryPointRequest = EntryPointRequest::new().with_entry_point(kernel_main);
@@ -195,19 +190,7 @@ pub extern "C" fn kernel_main_post_paging() -> ! {
 
     log::info!("Kernel boot finished after {:?}", arch::time::uptime());
 
-    #[cfg(test)]
-    test_main();
-
     log::info!("Welcome to KaDOS!");
 
     Arch::hcf()
-}
-
-#[cfg(test)]
-mod tests {
-    #[test_case]
-    #[allow(clippy::eq_op)]
-    fn test_tests() {
-        assert_eq!(1 + 1, 2);
-    }
 }

@@ -4,8 +4,10 @@ name = "kernel"
 version = "0.1.0"
 
 [[bin]]
+bench = false
 name = "kernel"
 path = "src/main.rs"
+test = false
 
 [dependencies]
 buddy_system_allocator = "0.11.0"

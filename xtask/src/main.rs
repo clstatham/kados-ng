@@ -1,10 +1,13 @@
-use std::path::PathBuf;
+use std::{
+    fmt::Display,
+    path::{Path, PathBuf},
+};
 
 use clap::{Parser, Subcommand};
 use xshell::{Shell, cmd};
 
 #[derive(Subcommand, Clone, Debug, PartialEq, Eq)]
-enum Mode {
+pub enum Mode {
     /// Build the kernel for a Raspberry Pi 4b
     Build {
         #[clap(short, long, default_value_t = false)]
@@ -20,8 +23,6 @@ enum Mode {
         #[clap(short, long, default_value_t = false)]
         release: bool,
     },
-    /// Build the kernel for a Raspberry Pi 4b and run tests in QEMU
-    Test,
     /// Flash the built image to an SD card for the Raspberry Pi
     Flash {
         /// Device to flash to (e.g. /dev/sdb)
@@ -29,17 +30,11 @@ enum Mode {
         #[clap(short, long, default_value_t = false)]
         release: bool,
     },
-    /// Internal mode used by the test runner
-    #[clap(hide = true)]
-    TestRunner {
-        /// Path to the kernel ELF file
-        kernel_path: String,
-    },
 }
 
 #[derive(Parser)]
 #[clap(about = "Build the kernel and run it in QEMU")]
-struct Args {
+pub struct Args {
     /// Mode of operation
     #[command(subcommand)]
     mode: Mode,
@@ -49,83 +44,202 @@ struct Args {
     extra_qemu_args: Option<String>,
 }
 
-impl Args {
-    fn kernel_path(&self) -> Option<String> {
-        match &self.mode {
-            Mode::TestRunner { kernel_path } => Some(kernel_path.clone()),
-            _ => None,
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Target {
+    AArch64,
+}
+
+impl Target {
+    pub fn target_dir(&self) -> &'static str {
+        match self {
+            Self::AArch64 => "aarch64-kados",
+        }
+    }
+
+    pub fn arch_dir(&self) -> PathBuf {
+        match self {
+            Self::AArch64 => PathBuf::from("arch").join("aarch64"),
         }
     }
 }
 
-const LIMINE_GIT_URL: &str = "https://github.com/limine-bootloader/limine.git";
-const LINKER_SCRIPT_NAME: &str = "linker.ld";
-const KERNEL_ELF_NAME: &str = "kernel";
-const KERNEL_IMG_NAME: &str = "kados.img";
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Profile {
+    Debug,
+    Release,
+}
 
-fn main() -> anyhow::Result<()> {
-    let args = Args::parse();
-    let sh = Shell::new()?;
+impl Display for Profile {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Debug => write!(f, "debug"),
+            Self::Release => write!(f, "release"),
+        }
+    }
+}
 
-    let release_mode = if let Mode::Build { release }
-    | Mode::Flash { release, .. }
-    | Mode::Run { release }
-    | Mode::Debug { release } = args.mode
-    {
-        release
-    } else {
-        false
-    };
+#[derive(Debug, Default)]
+struct ArgVec(Vec<String>);
 
-    let build_target = "aarch64-kados";
-    let target_dir = PathBuf::from(format!("target/{build_target}"));
-    let build_target_dir = target_dir.join(if release_mode { "release" } else { "debug" });
-    let arch_dir = PathBuf::from("arch/aarch64");
-    let mut kernel_elf_path = args
-        .kernel_path()
-        .unwrap_or_else(|| format!("{}/{}", build_target_dir.display(), KERNEL_ELF_NAME));
-    let kernel_img_path = build_target_dir.join(KERNEL_IMG_NAME);
-    let target_file_path = arch_dir.join(format!("{build_target}.json"));
+impl ArgVec {
+    pub fn push(&mut self, val: impl AsRef<Path>) {
+        self.0.push(val.as_ref().to_string_lossy().into_owned());
+    }
 
-    let rustflags = format!(
-        "-C link-arg=-T{} -Cforce-frame-pointers=yes -C symbol-mangling-version=v0",
-        arch_dir.join(LINKER_SCRIPT_NAME).display(),
-    );
+    pub fn into_inner(self) -> Vec<String> {
+        self.0
+    }
+}
 
-    if let Mode::Flash { ref device, .. } = args.mode {
-        cmd!(
-            sh,
-            "sudo dd if={kernel_img_path} of={device} bs=4M status=progress"
+impl IntoIterator for ArgVec {
+    type IntoIter = std::vec::IntoIter<String>;
+    type Item = String;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.0.into_iter()
+    }
+}
+
+#[macro_export]
+macro_rules! args {
+    ($($val:expr),*) => {{
+        let mut args = ArgVec::default();
+        $crate::extend!(args <- $($val),*);
+        args.into_inner()
+    }};
+}
+
+#[macro_export]
+macro_rules! extend {
+    ($args:ident <- $($val:expr),*) => {{
+        $(
+            $args.push($val);
+        )*
+    }};
+}
+
+pub fn banner() {
+    log::info!("{}", "=".repeat(80))
+}
+
+pub struct Context {
+    sh: Shell,
+    target: Target,
+    profile: Profile,
+    build_root: PathBuf,
+    kernel_elf_path: PathBuf,
+}
+
+impl Context {
+    pub fn new(target: Target, release: bool) -> anyhow::Result<Self> {
+        let mut this = Self {
+            sh: Shell::new()?,
+            target,
+            profile: if release {
+                Profile::Release
+            } else {
+                Profile::Debug
+            },
+            build_root: env!("CARGO_MANIFEST_DIR").parse::<PathBuf>()?.join(".."), // ./xtask/.. = ./
+            kernel_elf_path: PathBuf::new(),
+        };
+
+        this.kernel_elf_path = this.target_dir().join("kernel"); // default kernel elf
+
+        Ok(this)
+    }
+
+    pub fn target_dir(&self) -> PathBuf {
+        self.build_root
+            .join("target")
+            .join(self.target.target_dir())
+            .join(self.profile.to_string())
+    }
+
+    pub fn arch_dir(&self) -> PathBuf {
+        self.target.arch_dir()
+    }
+
+    pub fn target_json_path(&self) -> PathBuf {
+        self.arch_dir()
+            .join(self.target.target_dir())
+            .with_extension("json")
+    }
+
+    pub fn kernel_elf_path(&self) -> PathBuf {
+        self.kernel_elf_path.clone()
+    }
+
+    pub fn kernel_img_path(&self) -> PathBuf {
+        self.kernel_elf_path().with_extension("img")
+    }
+
+    pub fn linker_script_path(&self) -> PathBuf {
+        self.arch_dir().join("linker.ld")
+    }
+
+    pub fn uboot_dir(&self) -> PathBuf {
+        self.target_dir().join("u-boot")
+    }
+
+    pub fn limine_dir(&self) -> PathBuf {
+        self.target_dir().join("limine")
+    }
+
+    pub fn rpi_firmware_dir(&self) -> PathBuf {
+        self.target_dir().join("firmware")
+    }
+
+    pub fn rustflags(&self) -> String {
+        format!(
+            "-C link-arg=-T{} -Cforce-frame-pointers=yes -C symbol-mangling-version=v0",
+            self.linker_script_path().display(),
         )
-        .run()?;
-        cmd!(sh, "sync").run()?;
-        return Ok(());
     }
 
-    let mut cargo_args = vec![];
+    pub fn cargo_args(&self, mode: &str) -> Vec<String> {
+        let mut cargo_args = args!(
+            mode,
+            "--target",
+            self.target_json_path(),
+            "-p",
+            "kernel",
+            "-Zbuild-std=core,compiler_builtins,alloc",
+            "-Zbuild-std-features=compiler-builtins-mem"
+        );
 
-    if args.mode == Mode::Test {
-        cargo_args.push("test");
-        cargo_args.push("--no-run");
-    } else {
-        cargo_args.push("build");
+        if self.profile == Profile::Release {
+            cargo_args.push("--release".to_string());
+        }
+
+        cargo_args
     }
 
-    cargo_args.push("--target");
-    cargo_args.push(target_file_path.to_str().unwrap());
-    cargo_args.push("-p");
-    cargo_args.push("kernel");
-    cargo_args.push("-Zbuild-std=core,compiler_builtins,alloc");
-    cargo_args.push("-Zbuild-std-features=compiler-builtins-mem");
+    pub fn full_build_kernel(&self) -> anyhow::Result<()> {
+        log::info!("Building kernel with Cargo");
 
-    if release_mode {
-        cargo_args.push("--release");
+        cmd!(self.sh, "cargo")
+            .args(self.cargo_args("build"))
+            .env("RUSTFLAGS", self.rustflags())
+            .run()?;
+
+        self.create_new_image()?;
+
+        self.build_dependencies()?;
+
+        self.copy_files_to_image()?;
+
+        log::info!("Kernel build complete!");
+
+        Ok(())
     }
 
-    if args.mode == Mode::Test {
-        let cargo_output = cmd!(sh, "cargo")
-            .args(cargo_args)
-            .env("RUSTFLAGS", &rustflags)
+    pub fn full_build_kernel_test(&mut self) -> anyhow::Result<()> {
+        log::info!("Building kernel tests with Cargo");
+
+        let cargo_output = cmd!(self.sh, "cargo")
+            .args(self.cargo_args("test"))
+            .arg("--no-run")
             .ignore_status()
             .output()?;
 
@@ -136,9 +250,11 @@ fn main() -> anyhow::Result<()> {
 
         if !cargo_output.status.success() {
             eprintln!("{cargo_stderr}");
-            eprintln!("Cargo command failed: {:?}", cargo_output.status);
-            std::process::exit(1);
+            log::error!("Cargo command failed: {:?}", cargo_output.status);
+            anyhow::bail!("Cargo command failed");
         }
+
+        // override self.kernel_elf_path with the test elf
 
         let new_kernel_elf = cargo_stderr
             .split("/deps/")
@@ -148,96 +264,54 @@ fn main() -> anyhow::Result<()> {
             .strip_suffix(')')
             .unwrap()
             .to_string();
-        kernel_elf_path = build_target_dir
-            .join("deps")
-            .join(new_kernel_elf)
-            .display()
-            .to_string();
-    } else {
-        cmd!(sh, "cargo")
-            .args(cargo_args)
-            .env("RUSTFLAGS", &rustflags)
-            .run()?;
+        self.kernel_elf_path = self.target_dir().join("deps").join(new_kernel_elf);
+
+        // proceed with build as normal
+
+        self.create_new_image()?;
+
+        self.build_dependencies()?;
+
+        self.copy_files_to_image()?;
+
+        log::info!("Kernel tests build complete!");
+
+        Ok(())
     }
 
-    if kernel_img_path.exists() {
-        std::fs::remove_file(&kernel_img_path)?;
-    }
+    pub fn flash(&self, device: &str) -> anyhow::Result<()> {
+        self.full_build_kernel()?;
 
-    cmd!(sh, "truncate -s 128M {kernel_img_path}").run()?;
-    cmd!(sh, "mformat -i {kernel_img_path} ::").run()?;
-    cmd!(sh, "mmd -i {kernel_img_path} ::/EFI").run()?;
-    cmd!(sh, "mmd -i {kernel_img_path} ::/EFI/BOOT").run()?;
+        log::info!("Flashing SD card image to {device} (will sudo)");
+        let kernel_img_path = self.kernel_img_path();
 
-    let limine_dir = target_dir.join("limine");
-    if !limine_dir.exists() {
         cmd!(
-            sh,
-            "git clone {LIMINE_GIT_URL} --depth=1 --branch v9.x-binary {limine_dir}"
+            self.sh,
+            "sudo dd if={kernel_img_path} of={device} bs=4M status=progress"
         )
         .run()?;
+        cmd!(self.sh, "sync").run()?;
+
+        log::info!("Flash complete!");
+
+        Ok(())
     }
 
-    if !std::fs::exists("u-boot")? {
-        cmd!(sh, "git clone https://github.com/u-boot/u-boot.git").run()?;
-    }
+    pub fn run_qemu(&self, debug_adapter: bool) -> anyhow::Result<()> {
+        log::info!("Running QEMU");
 
-    if !std::fs::exists("firmware")? {
-        cmd!(
-            sh,
-            "git clone --depth=1 https://github.com/raspberrypi/firmware.git"
-        )
-        .run()?;
-    }
+        let qemu_drive_arg = format!("if=sd,format=raw,file={}", self.kernel_img_path().display());
 
-    {
-        let _uboot = sh.push_dir("u-boot");
-        cmd!(sh, "make rpi_4_defconfig").run()?;
-        let nproc = num_cpus::get().to_string();
-        cmd!(sh, "make -j{nproc} CROSS_COMPILE=aarch64-none-elf-").run()?;
-        cmd!(sh, "mcopy -i ../{kernel_img_path} u-boot.bin ::/u-boot.bin").run()?;
-    }
-
-    let bootaa64 = limine_dir.join("BOOTAA64.EFI");
-    cmd!(
-        sh,
-        "mcopy -i {kernel_img_path} {bootaa64} ::/EFI/BOOT/BOOTAA64.EFI"
-    )
-    .run()?;
-    cmd!(
-        sh,
-        "mcopy -i {kernel_img_path} {kernel_elf_path} ::/kados.elf"
-    )
-    .run()?;
-    cmd!(sh, "mcopy -i {kernel_img_path} limine.conf ::/limine.conf").run()?;
-
-    cmd!(sh, "mcopy -i {kernel_img_path} config.txt ::/config.txt").run()?;
-
-    cmd!(
-        sh,
-        "mcopy -i {kernel_img_path} firmware/boot/start4.elf ::/start4.elf"
-    )
-    .run()?;
-    cmd!(
-        sh,
-        "mcopy -i {kernel_img_path} firmware/boot/fixup4.dat ::/fixup4.dat"
-    )
-    .run()?;
-    cmd!(
-        sh,
-        "mcopy -i {kernel_img_path} firmware/boot/bcm2711-rpi-4-b.dtb ::/bcm2711-rpi-4-b.dtb"
-    )
-    .run()?;
-
-    if args.mode == Mode::Test {
-        cmd!(sh, "cargo")
-            .args(["xtask", "test-runner", kernel_elf_path.as_str()])
-            .run()?;
-        return Ok(());
-    }
-
-    if !matches!(args.mode, Mode::Build { .. }) {
-        let qemu_drive_arg_rpi = format!("if=sd,format=raw,file={}", kernel_img_path.display());
+        let uboot_kernel_arg = format!("{}", self.uboot_dir().join("u-boot.bin").display());
+        let uboot_dtb_arg = format!(
+            "{}",
+            self.uboot_dir()
+                .join("arch")
+                .join("arm")
+                .join("dts")
+                .join("bcm2711-rpi-4-b.dtb")
+                .display()
+        );
 
         let mut qemu_args = vec![];
 
@@ -247,11 +321,11 @@ fn main() -> anyhow::Result<()> {
             "-cpu",
             "cortex-a72",
             "-drive",
-            &qemu_drive_arg_rpi,
+            &qemu_drive_arg,
             "-kernel",
-            "u-boot/u-boot.bin",
+            &uboot_kernel_arg,
             "-dtb",
-            "u-boot/arch/arm/dts/bcm2711-rpi-4-b.dtb",
+            &uboot_dtb_arg,
             "-D",
             "target/log.txt",
             "-d",
@@ -263,18 +337,169 @@ fn main() -> anyhow::Result<()> {
             "-semihosting",
         ]);
 
-        if matches!(args.mode, Mode::Debug { .. }) {
+        if debug_adapter {
             qemu_args.push("-s");
             qemu_args.push("-S");
         }
 
-        if let Some(extra_args) = args.extra_qemu_args.as_ref() {
-            for arg in extra_args.split_whitespace() {
-                qemu_args.push(arg);
-            }
+        cmd!(self.sh, "qemu-system-aarch64").args(qemu_args).run()?;
+
+        Ok(())
+    }
+
+    fn create_new_image(&self) -> anyhow::Result<()> {
+        log::info!("Creating new SD card image");
+
+        let kernel_img_path = self.kernel_img_path();
+
+        if kernel_img_path.exists() {
+            std::fs::remove_file(&kernel_img_path)?;
         }
 
-        cmd!(sh, "qemu-system-aarch64").args(qemu_args).run()?;
+        cmd!(self.sh, "truncate -s 128M {kernel_img_path}").run()?;
+        cmd!(self.sh, "mformat -i {kernel_img_path} ::").run()?;
+        cmd!(self.sh, "mmd -i {kernel_img_path} ::/EFI").run()?;
+        cmd!(self.sh, "mmd -i {kernel_img_path} ::/EFI/BOOT").run()?;
+
+        Ok(())
+    }
+
+    fn build_dependencies(&self) -> anyhow::Result<()> {
+        let limine_dir = self.limine_dir();
+        let uboot_dir = self.uboot_dir();
+        let firmware_dir = self.rpi_firmware_dir();
+
+        log::info!("Building dependencies");
+
+        if !limine_dir.exists() {
+            log::info!("Downloading Limine");
+            cmd!(
+                self.sh,
+                "git clone https://github.com/limine-bootloader/limine.git --depth=1 --branch v9.x-binary {limine_dir}"
+            )
+            .run()?;
+        } else {
+            let _guard = self.sh.push_dir(&limine_dir);
+            cmd!(self.sh, "git fetch").run()?;
+        }
+
+        if !uboot_dir.exists() {
+            log::info!("Downloading U-Boot");
+            cmd!(
+                self.sh,
+                "git clone https://github.com/u-boot/u-boot.git {uboot_dir}"
+            )
+            .run()?;
+        } else {
+            let _guard = self.sh.push_dir(&uboot_dir);
+            cmd!(self.sh, "git fetch").run()?;
+        }
+
+        if !firmware_dir.exists() {
+            log::info!("Downloading RPi Firmware");
+            cmd!(
+                self.sh,
+                "git clone --depth=1 https://github.com/raspberrypi/firmware.git {firmware_dir}"
+            )
+            .run()?;
+        } else {
+            let _guard = self.sh.push_dir(&firmware_dir);
+            cmd!(self.sh, "git fetch").run()?;
+        }
+
+        {
+            log::info!("Building U-Boot");
+            let _uboot = self.sh.push_dir(&uboot_dir);
+            cmd!(self.sh, "make rpi_4_defconfig").run()?;
+            let nproc = num_cpus::get().to_string();
+            cmd!(self.sh, "make -j{nproc} CROSS_COMPILE=aarch64-none-elf-").run()?;
+        }
+
+        Ok(())
+    }
+
+    fn copy_files_to_image(&self) -> anyhow::Result<()> {
+        log::info!("Copying files to SD card image");
+
+        let kernel_elf_path = self.kernel_elf_path();
+        let kernel_img_path = self.kernel_img_path();
+        let limine_dir = self.limine_dir();
+        let uboot_dir = self.uboot_dir();
+        let firmware_dir = self.rpi_firmware_dir();
+
+        cmd!(
+            self.sh,
+            "mcopy -i {kernel_img_path} {uboot_dir}/u-boot.bin ::/u-boot.bin"
+        )
+        .run()?;
+
+        cmd!(
+            self.sh,
+            "mcopy -i {kernel_img_path} {limine_dir}/BOOTAA64.EFI ::/EFI/BOOT/BOOTAA64.EFI"
+        )
+        .run()?;
+        cmd!(
+            self.sh,
+            "mcopy -i {kernel_img_path} {kernel_elf_path} ::/kados.elf"
+        )
+        .run()?;
+        cmd!(
+            self.sh,
+            "mcopy -i {kernel_img_path} limine.conf ::/limine.conf"
+        )
+        .run()?;
+
+        cmd!(
+            self.sh,
+            "mcopy -i {kernel_img_path} config.txt ::/config.txt"
+        )
+        .run()?;
+
+        cmd!(
+            self.sh,
+            "mcopy -i {kernel_img_path} {firmware_dir}/boot/start4.elf ::/start4.elf"
+        )
+        .run()?;
+        cmd!(
+            self.sh,
+            "mcopy -i {kernel_img_path} {firmware_dir}/boot/fixup4.dat ::/fixup4.dat"
+        )
+        .run()?;
+        cmd!(
+            self.sh,
+            "mcopy -i {kernel_img_path} {firmware_dir}/boot/bcm2711-rpi-4-b.dtb ::/bcm2711-rpi-4-b.dtb"
+        )
+        .run()?;
+
+        Ok(())
+    }
+}
+
+fn main() -> anyhow::Result<()> {
+    env_logger::builder()
+        .filter_level(log::LevelFilter::Info)
+        .init();
+    let args = Args::parse();
+
+    match args.mode {
+        Mode::Build { release } => {
+            let cx = Context::new(Target::AArch64, release)?;
+            cx.full_build_kernel()?;
+        }
+        Mode::Debug { release } => {
+            let cx = Context::new(Target::AArch64, release)?;
+            cx.full_build_kernel()?;
+            cx.run_qemu(true)?;
+        }
+        Mode::Run { release } => {
+            let cx = Context::new(Target::AArch64, release)?;
+            cx.full_build_kernel()?;
+            cx.run_qemu(false)?;
+        }
+        Mode::Flash { device, release } => {
+            let cx = Context::new(Target::AArch64, release)?;
+            cx.flash(device.as_str())?;
+        }
     }
 
     Ok(())
