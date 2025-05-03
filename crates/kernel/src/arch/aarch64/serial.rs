@@ -3,8 +3,7 @@ use core::fmt::{self, Write};
 use arm_pl011::Pl011Uart;
 use spin::{Once, mutex::SpinMutex};
 
-// const PL011_BASE: *mut u8 = 0x0900_0000 as *mut u8; // Base address of PL011 UART
-const PL011_BASE: *mut u8 = 0xFE201000 as *mut u8; // RPi4
+const PL011_BASE: *mut u8 = 0xFE201000 as *mut u8; // RPi4 PL011 UART base address
 
 pub struct Uart(Pl011Uart);
 

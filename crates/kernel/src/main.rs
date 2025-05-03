@@ -1,11 +1,7 @@
 #![no_std]
 #![no_main]
-#![allow(
-    internal_features,
-    clippy::missing_safety_doc,
-    clippy::new_without_default
-)]
-#![feature(lang_items, test, custom_test_frameworks)]
+#![allow(clippy::missing_safety_doc, clippy::new_without_default)]
+#![feature(test, custom_test_frameworks)]
 #![test_runner(crate::testing::test_runner)]
 #![reexport_test_harness_main = "test_main"]
 

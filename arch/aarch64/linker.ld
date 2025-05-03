@@ -20,8 +20,8 @@ SECTIONS
 
     .text : AT(ADDR(.text) - KERNEL_OFFSET) {
         __text_start = .;
-        *(.text)
-        . = ALIGN(0x800);
+        *(.text*)
+    . = ALIGN(0x800);
         KEEP(*(.text.vectors*))
 	. = ALIGN(4096);
         __text_end = .;

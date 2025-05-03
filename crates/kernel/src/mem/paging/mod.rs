@@ -5,7 +5,7 @@ use spin::Once;
 use table::PageFlags;
 
 use crate::{
-    KERNEL_OFFSET, KERNEL_STACK_SIZE,
+    __rodata_end, __rodata_start, __text_end, __text_start, KERNEL_OFFSET, KERNEL_STACK_SIZE,
     arch::{Arch, ArchTrait},
     mem::units::VirtAddr,
 };
@@ -107,7 +107,13 @@ pub unsafe fn map_memory() -> ! {
         for frame_idx in 0..kernel_size.frame_count() {
             let phys = PhysAddr::new_canonical(kernel_base.value() + frame_idx * Arch::PAGE_SIZE);
             let virt = VirtAddr::new_canonical(KERNEL_OFFSET + frame_idx * Arch::PAGE_SIZE);
-            let flags = PageFlags::new().executable().writable();
+            let flags = if (__text_start()..__text_end()).contains(&virt.value()) {
+                PageFlags::new_for_text_segment()
+            } else if (__rodata_start()..__rodata_end()).contains(&virt.value()) {
+                PageFlags::new_for_rodata_segment()
+            } else {
+                PageFlags::new_for_data_segment()
+            };
             let flush = mapper.map_to(virt, phys, flags).unwrap();
             flush.ignore();
         }

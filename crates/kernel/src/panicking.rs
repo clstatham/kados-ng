@@ -15,9 +15,6 @@ use crate::{
     },
 };
 
-#[lang = "eh_personality"]
-extern "C" fn eh_personality() {}
-
 fn prevent_double_panic() {
     static PANICKING: AtomicBool = AtomicBool::new(false);
 

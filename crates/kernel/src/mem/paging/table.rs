@@ -154,18 +154,18 @@ pub struct PageFlags(usize);
 impl PageFlags {
     pub fn new() -> Self {
         Self(
-            Arch::PAGE_FLAG_PAGE_DEFAULTS, // | Arch::PAGE_FLAG_READWRITE
-                                           // | Arch::PAGE_FLAG_READONLY
-                                           // | Arch::PAGE_FLAG_NON_EXECUTABLE
-                                           // // | Arch::PAGE_FLAG_EXECUTABLE
-                                           // | Arch::PAGE_FLAG_NON_GLOBAL,
+            Arch::PAGE_FLAG_PAGE_DEFAULTS
+                | Arch::PAGE_FLAG_READONLY
+                | Arch::PAGE_FLAG_NON_EXECUTABLE
+                | Arch::PAGE_FLAG_NON_GLOBAL,
         )
     }
 
     pub fn new_table() -> Self {
         Self(
-            Arch::PAGE_FLAG_TABLE_DEFAULTS, // | Arch::PAGE_FLAG_NON_EXECUTABLE
-                                            // | Arch::PAGE_FLAG_NON_GLOBAL,
+            Arch::PAGE_FLAG_TABLE_DEFAULTS
+                | Arch::PAGE_FLAG_NON_EXECUTABLE
+                | Arch::PAGE_FLAG_NON_GLOBAL,
         )
     }
 
