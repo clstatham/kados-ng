@@ -58,21 +58,17 @@ impl<A: FrameAllocator> Mapper<A> {
         self.table().phys_addr() == unsafe { Arch::current_page_table() }
     }
 
+    #[inline(always)]
     pub unsafe fn make_current(&self) {
         unsafe {
             Arch::set_current_page_table(self.table_addr);
         }
     }
 
+    #[inline(always)]
     pub unsafe fn make_current_and_flush_tlb(&self) {
         unsafe {
             self.make_current();
-            self.flush_tlb();
-        }
-    }
-
-    pub unsafe fn flush_tlb(&self) {
-        unsafe {
             Arch::invalidate_all();
         }
     }

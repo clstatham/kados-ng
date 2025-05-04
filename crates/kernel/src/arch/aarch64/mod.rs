@@ -74,7 +74,7 @@ impl ArchTrait for AArch64 {
     }
 
     unsafe fn interrupts_enabled() -> bool {
-        todo!()
+        DAIF.get() & 0b1111 != 0
     }
 
     #[inline(always)]
@@ -119,15 +119,15 @@ impl ArchTrait for AArch64 {
     }
 
     #[inline(always)]
-    unsafe fn set_stack_pointer(sp: VirtAddr, next_fn: usize) -> ! {
+    unsafe fn set_stack_pointer_post_mapping(sp: VirtAddr) -> ! {
         unsafe {
             core::arch::asm!(
                 "msr SPSel, #1",
                 "mov sp, {}",
                 "mov fp, xzr",
-                "br {}",
+                "b {}",
                 in(reg) sp.value(),
-                in(reg) next_fn, options(noreturn)
+                sym crate::kernel_main_post_paging, options(noreturn)
             );
         }
     }

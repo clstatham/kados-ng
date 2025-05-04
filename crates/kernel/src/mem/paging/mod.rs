@@ -5,12 +5,10 @@ use spin::Once;
 use table::PageFlags;
 
 use crate::{
-    __rodata_end, __rodata_start, __text_end, __text_start, FRAMEBUFFER_INFO, KERNEL_OFFSET,
-    KERNEL_STACK_SIZE,
+    __rodata_end, __rodata_start, __text_end, __text_start, KERNEL_OFFSET, KERNEL_STACK_SIZE,
     arch::{Arch, ArchTrait},
     mem::{
         heap::{KERNEL_HEAP_SIZE, KERNEL_HEAP_START},
-        hhdm_physical_offset,
         units::VirtAddr,
     },
 };
@@ -128,15 +126,7 @@ pub unsafe fn map_memory() -> ! {
             flush.ignore();
         }
 
-        log::debug!("New page table: {:?}", mapper.table().phys_addr());
-        for i in 0..Arch::PAGE_ENTRIES {
-            if let Ok(entry) = mapper.table().entry(i) {
-                if entry.flags().is_present() {
-                    log::debug!("{}: {} [{:?}]", i, entry.addr().unwrap(), entry.flags());
-                }
-            }
-        }
-
+        log::info!("Mapping new kernel stack");
         let stack_size = FrameCount::from_bytes(KERNEL_STACK_SIZE);
         let stack_base = KernelFrameAllocator.allocate(stack_size).unwrap();
         for frame_idx in 0..stack_size.frame_count() {
@@ -151,7 +141,6 @@ pub unsafe fn map_memory() -> ! {
             (stack_base.add(stack_size.to_bytes())).value() + VirtAddr::MIN_HIGH.value();
 
         log::info!("Mapping heap");
-
         let heap_size_pages = KERNEL_HEAP_SIZE / Arch::PAGE_SIZE;
         for page_idx in 0..heap_size_pages {
             let virt = VirtAddr::new_canonical(KERNEL_HEAP_START + page_idx * Arch::PAGE_SIZE);
@@ -160,13 +149,19 @@ pub unsafe fn map_memory() -> ! {
             flush.ignore();
         }
 
+        log::debug!("New page table: {:?}", mapper.table().phys_addr());
+        for i in 0..Arch::PAGE_ENTRIES {
+            if let Ok(entry) = mapper.table().entry(i) {
+                if entry.flags().is_present() {
+                    log::debug!("{}: {} [{:?}]", i, entry.addr().unwrap(), entry.flags());
+                }
+            }
+        }
+
         mapper.make_current();
 
         Arch::init_mem();
 
-        Arch::set_stack_pointer(
-            VirtAddr::new_canonical(stack_top),
-            crate::kernel_main_post_paging as *const () as usize,
-        )
+        Arch::set_stack_pointer_post_mapping(VirtAddr::new_canonical(stack_top))
     }
 }

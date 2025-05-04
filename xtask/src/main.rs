@@ -1,7 +1,4 @@
-use std::{
-    fmt::Display,
-    path::{Path, PathBuf},
-};
+use std::{fmt::Display, path::PathBuf};
 
 use clap::{Parser, Subcommand};
 use xshell::{Shell, cmd};
@@ -81,34 +78,12 @@ impl Display for Profile {
     }
 }
 
-#[derive(Debug, Default)]
-struct ArgVec(Vec<String>);
-
-impl ArgVec {
-    pub fn push(&mut self, val: impl AsRef<Path>) {
-        self.0.push(val.as_ref().to_string_lossy().into_owned());
-    }
-
-    pub fn into_inner(self) -> Vec<String> {
-        self.0
-    }
-}
-
-impl IntoIterator for ArgVec {
-    type IntoIter = std::vec::IntoIter<String>;
-    type Item = String;
-
-    fn into_iter(self) -> Self::IntoIter {
-        self.0.into_iter()
-    }
-}
-
 #[macro_export]
 macro_rules! args {
     ($($val:expr),*) => {{
-        let mut args = ArgVec::default();
+        let mut args = Vec::<String>::new();
         $crate::extend!(args <- $($val),*);
-        args.into_inner()
+        args
     }};
 }
 
@@ -116,13 +91,9 @@ macro_rules! args {
 macro_rules! extend {
     ($args:ident <- $($val:expr),*) => {{
         $(
-            $args.push($val);
+            $args.push(AsRef::<str>::as_ref($val).to_string());
         )*
     }};
-}
-
-pub fn banner() {
-    log::info!("{}", "=".repeat(80))
 }
 
 pub struct Context {
@@ -212,7 +183,7 @@ impl Context {
         let mut cargo_args = args!(
             mode,
             "--target",
-            self.target_json_path(),
+            &self.target_json_path().to_string_lossy(),
             "-p",
             "kernel",
             "-Zbuild-std=core,compiler_builtins,alloc",
@@ -220,7 +191,7 @@ impl Context {
         );
 
         if self.profile == Profile::Release {
-            cargo_args.push("--release".to_string());
+            extend!(cargo_args <- "--release");
         }
 
         cargo_args

@@ -94,13 +94,13 @@ impl ArchTrait for X86_64 {
     }
 
     #[inline(always)]
-    unsafe fn set_stack_pointer(sp: VirtAddr, next_fn: usize) -> ! {
+    unsafe fn set_stack_pointer_post_mapping(sp: VirtAddr) -> ! {
         unsafe {
             core::arch::asm!("
                 mov rsp, {sp}
                 xor rbp, rbp
-                jmp {next_fn}
-            ", sp = in(reg) sp.value(), next_fn = in(reg) next_fn, options(noreturn))
+                jmp [{next_fn}]
+            ", sp = in(reg) sp.value(), next_fn = sym crate::kernel_main_post_paging, options(noreturn))
         }
     }
 
