@@ -12,8 +12,11 @@ use super::time::uptime;
 static RNG: Once<IrqMutex<ChaChaRng>> = Once::new();
 
 pub fn rng() -> &'static IrqMutex<ChaChaRng> {
-    let rng = rand_chacha::ChaChaRng::seed_from_u64(uptime().as_nanos() as u64);
-    RNG.call_once(|| IrqMutex::new(rng))
+    RNG.call_once(|| {
+        IrqMutex::new(rand_chacha::ChaChaRng::seed_from_u64(
+            uptime().as_nanos() as u64
+        ))
+    })
 }
 
 pub fn getrandom<T>() -> T

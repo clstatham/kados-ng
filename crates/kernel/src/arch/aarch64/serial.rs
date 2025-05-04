@@ -27,7 +27,9 @@ pub fn write_fmt(args: fmt::Arguments) {
 }
 
 pub fn init() {
-    let mut uart = Pl011Uart::new(PL011_BASE);
-    uart.init();
-    UART.call_once(|| IrqMutex::new(Uart(uart)));
+    UART.call_once(|| {
+        let mut uart = Pl011Uart::new(PL011_BASE);
+        uart.init();
+        IrqMutex::new(Uart(uart))
+    });
 }

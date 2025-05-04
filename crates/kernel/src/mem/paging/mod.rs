@@ -1,4 +1,4 @@
-use allocator::{FrameAllocator, KernelFrameAllocator};
+use allocator::KernelFrameAllocator;
 use limine::memory_map::EntryType;
 use mapper::Mapper;
 use spin::Once;
@@ -86,7 +86,7 @@ pub fn map_memory() -> ! {
     let mem_map = MEM_MAP_ENTRIES.get().unwrap();
 
     unsafe {
-        let mut mapper = Mapper::create(KernelFrameAllocator).unwrap();
+        let mut mapper = Mapper::create().unwrap();
         log::debug!("Mapping free areas");
         for entry in mem_map
             .usable_entries()
@@ -126,7 +126,7 @@ pub fn map_memory() -> ! {
             flush.ignore();
         }
 
-        log::info!("Mapping new kernel stack");
+        log::debug!("Mapping new kernel stack");
         let stack_size = FrameCount::from_bytes(KERNEL_STACK_SIZE);
         let stack_base = KernelFrameAllocator.allocate(stack_size).unwrap();
         for frame_idx in 0..stack_size.frame_count() {
@@ -140,7 +140,7 @@ pub fn map_memory() -> ! {
         let stack_top =
             (stack_base.add(stack_size.to_bytes())).value() + VirtAddr::MIN_HIGH.value();
 
-        log::info!("Mapping heap");
+        log::debug!("Mapping heap");
         let heap_size_pages = KERNEL_HEAP_SIZE / Arch::PAGE_SIZE;
         for page_idx in 0..heap_size_pages {
             let virt = VirtAddr::new_canonical(KERNEL_HEAP_START + page_idx * Arch::PAGE_SIZE);
@@ -151,10 +151,9 @@ pub fn map_memory() -> ! {
 
         log::debug!("New page table: {:?}", mapper.table().phys_addr());
         for i in 0..Arch::PAGE_ENTRIES {
-            if let Ok(entry) = mapper.table().entry(i) {
-                if entry.flags().is_present() {
-                    log::debug!("{}: {} [{:?}]", i, entry.addr().unwrap(), entry.flags());
-                }
+            let entry = mapper.table()[i];
+            if entry.flags().is_present() {
+                log::debug!("{}: {} [{:?}]", i, entry.addr().unwrap(), entry.flags());
             }
         }
 

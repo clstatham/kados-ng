@@ -7,7 +7,7 @@ use crate::{
 };
 
 use super::{
-    allocator::FrameAllocator,
+    allocator::KernelFrameAllocator,
     table::{PageFlags, PageTable, PageTableEntry},
 };
 
@@ -31,37 +31,32 @@ impl PageFlush {
     }
 }
 
-pub struct Mapper<A: FrameAllocator> {
-    table_addr: PhysAddr,
-    allocator: A,
+pub struct Mapper<'a> {
+    table: &'a mut PageTable,
 }
 
-impl<A: FrameAllocator> Mapper<A> {
-    pub fn new(table_addr: PhysAddr, allocator: A) -> Self {
+impl<'a> Mapper<'a> {
+    pub unsafe fn create() -> Result<Self, MemError> {
+        let table_addr = unsafe { KernelFrameAllocator.allocate_one()? };
+        Ok(Self {
+            table: unsafe { &mut *table_addr.as_hhdm_virt().as_raw_ptr_mut() },
+        })
+    }
+
+    pub unsafe fn current() -> Self {
         Self {
-            table_addr,
-            allocator,
+            table: PageTable::current(),
         }
     }
 
-    pub unsafe fn create(mut allocator: A) -> Result<Self, MemError> {
-        let table_addr = unsafe { allocator.allocate_one()? };
-        Ok(Self::new(table_addr, allocator))
-    }
-
-    pub unsafe fn current(allocator: A) -> Self {
-        let table_addr = unsafe { Arch::current_page_table() };
-        Self::new(table_addr, allocator)
-    }
-
     pub fn is_current(&self) -> bool {
-        self.table().phys_addr() == unsafe { Arch::current_page_table() }
+        self.table.phys_addr() == unsafe { Arch::current_page_table() }
     }
 
     #[inline(always)]
     pub unsafe fn make_current(&self) {
         unsafe {
-            Arch::set_current_page_table(self.table_addr);
+            Arch::set_current_page_table(self.table.phys_addr());
         }
     }
 
@@ -73,29 +68,19 @@ impl<A: FrameAllocator> Mapper<A> {
         }
     }
 
-    pub fn table(&self) -> PageTable {
-        PageTable::new(VirtAddr::NULL, self.table_addr, Arch::PAGE_LEVELS - 1)
+    pub fn table(&self) -> &PageTable {
+        self.table
     }
 
-    fn visit<R>(
-        &self,
-        addr: VirtAddr,
-        f: impl FnOnce(&mut PageTable, usize) -> R,
-    ) -> Result<R, MemError> {
-        let mut table = self.table();
-
-        loop {
-            let i = table.index_of(addr)?;
-            if table.level() == 0 {
-                return Ok(f(&mut table, i));
-            } else {
-                table = table.next(i)?;
-            }
-        }
+    pub fn table_mut(&mut self) -> &mut PageTable {
+        self.table
     }
 
     pub fn translate(&self, addr: VirtAddr) -> Result<PageTableEntry, MemError> {
-        let entry = self.visit(addr, |table, i| table.entry(i))??;
+        let p3 = self.table.next_table(addr.page_table_index(3))?;
+        let p2 = p3.next_table(addr.page_table_index(2))?;
+        let p1 = p2.next_table(addr.page_table_index(1))?;
+        let entry = p1[addr.page_table_index(0)];
         Ok(entry)
     }
 
@@ -110,7 +95,7 @@ impl<A: FrameAllocator> Mapper<A> {
 
     pub unsafe fn map(&mut self, addr: VirtAddr, flags: PageFlags) -> Result<PageFlush, MemError> {
         unsafe {
-            let phys = self.allocator.allocate_one()?;
+            let phys = KernelFrameAllocator.allocate_one()?;
             self.map_to(addr, phys, flags)
         }
     }
@@ -121,39 +106,15 @@ impl<A: FrameAllocator> Mapper<A> {
         phys: PhysAddr,
         flags: PageFlags,
     ) -> Result<PageFlush, MemError> {
-        let entry = PageTableEntry::new(phys.value(), flags);
-        let mut table = self.table();
+        let insert_flags = PageFlags::new_table();
 
-        loop {
-            let i = table.index_of(virt)?;
-            if table.level() == 0 {
-                // log::trace!("Mapping {virt:?} => {phys:?} with {flags:?}");
-                // let existing_entry = table.entry(i)?;
-                // if existing_entry.raw() != 0 {
-                //     log::warn!(
-                //         "REMAPPING {:?} from {:?} to {:?}",
-                //         virt,
-                //         existing_entry.addr(),
-                //         entry.addr()
-                //     );
-                // }
-                table.set_entry(i, entry)?;
-                return Ok(PageFlush::new(virt));
-            } else {
-                let next = match table.next(i) {
-                    Ok(next) => next,
-                    Err(MemError::PageNotPresent(_)) => {
-                        let next_phys = unsafe { self.allocator.allocate_one()? };
-                        table.set_entry(
-                            i,
-                            PageTableEntry::new(next_phys.value(), PageFlags::new_table()),
-                        )?;
-                        table.next(i)?
-                    }
-                    Err(e) => return Err(e),
-                };
-                table = next;
-            }
-        }
+        let p3 = self
+            .table
+            .next_table_create(virt.page_table_index(3), insert_flags)?;
+        let p2 = p3.next_table_create(virt.page_table_index(2), insert_flags)?;
+        let p1 = p2.next_table_create(virt.page_table_index(1), insert_flags)?;
+        let entry = &mut p1[virt.page_table_index(0)];
+        *entry = PageTableEntry::new(phys.value(), flags);
+        Ok(PageFlush::new(virt))
     }
 }

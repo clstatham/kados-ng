@@ -102,7 +102,7 @@ pub fn unwind_kernel_stack() -> Result<(), UnwindStackError> {
         return Ok(());
     }
 
-    let mapper = unsafe { Mapper::current(KernelFrameAllocator) };
+    let mapper = unsafe { Mapper::current() };
 
     println!("---BEGIN BACKTRACE---");
     for depth in 0..64 {

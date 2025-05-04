@@ -161,6 +161,10 @@ impl VirtAddr {
         Ok(())
     }
 
+    pub fn as_hhdm_phys(self) -> PhysAddr {
+        PhysAddr::new_canonical(self.value() - hhdm_physical_offset())
+    }
+
     pub const fn add(self, offset: usize) -> Self {
         Self::new_canonical(self.value() + offset)
     }

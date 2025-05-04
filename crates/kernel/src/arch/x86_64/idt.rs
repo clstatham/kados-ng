@@ -393,7 +393,7 @@ extern "C" fn x64_handle_interrupt(vector: u8, stack_frame: *mut InterruptErrorF
             );
             let rip = stack_frame.frame.rip;
             log::error!("Exception IP {:#x}", rip);
-            log::error!("Faulted access address {:#x}", accessed_address,);
+            log::error!("Faulted access address {:#x}", accessed_address);
             panic!("Kernel page fault");
             // }
         }

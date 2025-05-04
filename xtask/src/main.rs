@@ -589,7 +589,7 @@ impl Context {
             "-no-reboot",
             "-no-shutdown",
             "-m",
-            "4G",
+            "2G",
             "-serial",
             "stdio",
             "-cdrom",

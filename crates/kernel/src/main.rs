@@ -18,7 +18,10 @@ use limine::{
     },
 };
 use mem::{
-    paging::{MEM_MAP_ENTRIES, MemMapEntries, MemMapEntry, allocator::add_kernel_frames},
+    paging::{
+        MEM_MAP_ENTRIES, MemMapEntries, MemMapEntry,
+        allocator::{add_kernel_frames, kernel_frame_allocator},
+    },
     units::{FrameCount, PhysAddr},
 };
 use spin::Once;
@@ -96,6 +99,8 @@ pub extern "C" fn kernel_main() -> ! {
     }
 
     logging::init();
+
+    log::info!("HHDM offset: {:#016x}", hhdm.offset());
 
     let kernel_file = KERNEL_FILE.get_response().unwrap();
     let kernel_file = kernel_file.file();
@@ -198,6 +203,9 @@ pub extern "C" fn kernel_main_post_paging() -> ! {
     unsafe {
         Arch::init_post_heap();
     }
+
+    log::info!("Initializing frame allocator (post-heap)");
+    kernel_frame_allocator().lock().convert_post_heap().unwrap();
 
     log::info!("Initializing framebuffer");
     framebuffer::init(*FRAMEBUFFER_INFO.get().unwrap());
