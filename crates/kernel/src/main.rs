@@ -85,7 +85,7 @@ pub extern "C" fn kernel_main() -> ! {
     mem::HHDM_PHYSICAL_OFFSET.store(hhdm.offset() as usize, Ordering::SeqCst);
 
     unsafe {
-        Arch::pre_kernel_main_init();
+        Arch::init_pre_kernel_main();
     }
 
     let boot_time = BOOT_TIME.get_response().unwrap();
@@ -138,7 +138,9 @@ pub extern "C" fn kernel_main() -> ! {
                     kind: entry.entry_type,
                 });
             }
-            EntryType::BOOTLOADER_RECLAIMABLE | EntryType::ACPI_RECLAIMABLE => {
+            EntryType::BOOTLOADER_RECLAIMABLE
+            | EntryType::ACPI_RECLAIMABLE
+            | EntryType::FRAMEBUFFER => {
                 log::info!(
                     "Reclaimable region: {:016x} .. {:016x}",
                     entry.base,
@@ -190,16 +192,14 @@ pub extern "C" fn kernel_main_post_paging() -> ! {
         unsafe { core::slice::from_raw_parts(kernel_file_addr.as_raw_ptr(), kernel_file_size) };
     KERNEL_ELF.call_once(|| ElfFile::new(kernel_file_data).expect("Error parsing kernel ELF file"));
 
-    log::info!("Initializing heap");
-
     unsafe {
-        mem::heap::init_heap().expect("Error initializing heap");
+        mem::heap::init_heap();
     }
 
     log::info!("Initializing memory (post-heap)");
 
     unsafe {
-        Arch::post_heap_init();
+        Arch::init_post_heap();
     }
 
     log::info!("Initializing framebuffer");

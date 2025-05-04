@@ -5,9 +5,14 @@ use spin::Once;
 use table::PageFlags;
 
 use crate::{
-    __rodata_end, __rodata_start, __text_end, __text_start, KERNEL_OFFSET, KERNEL_STACK_SIZE,
+    __rodata_end, __rodata_start, __text_end, __text_start, FRAMEBUFFER_INFO, KERNEL_OFFSET,
+    KERNEL_STACK_SIZE,
     arch::{Arch, ArchTrait},
-    mem::units::VirtAddr,
+    mem::{
+        heap::{KERNEL_HEAP_SIZE, KERNEL_HEAP_START},
+        hhdm_physical_offset,
+        units::VirtAddr,
+    },
 };
 
 use super::units::{FrameCount, PhysAddr};
@@ -107,6 +112,7 @@ pub unsafe fn map_memory() -> ! {
         for frame_idx in 0..kernel_size.frame_count() {
             let phys = PhysAddr::new_canonical(kernel_base.value() + frame_idx * Arch::PAGE_SIZE);
             let virt = VirtAddr::new_canonical(KERNEL_OFFSET + frame_idx * Arch::PAGE_SIZE);
+
             let flags = if (__text_start()..__text_end()).contains(&virt.value()) {
                 PageFlags::new_for_text_segment()
             } else if (__rodata_start()..__rodata_end()).contains(&virt.value()) {
@@ -114,6 +120,10 @@ pub unsafe fn map_memory() -> ! {
             } else {
                 PageFlags::new_for_data_segment()
             };
+            let flush = mapper.map_to(virt, phys, flags).unwrap();
+            flush.ignore();
+
+            let virt = phys.as_hhdm_virt();
             let flush = mapper.map_to(virt, phys, flags).unwrap();
             flush.ignore();
         }
@@ -139,6 +149,16 @@ pub unsafe fn map_memory() -> ! {
         }
         let stack_top =
             (stack_base.add(stack_size.to_bytes())).value() + VirtAddr::MIN_HIGH.value();
+
+        log::info!("Mapping heap");
+
+        let heap_size_pages = KERNEL_HEAP_SIZE / Arch::PAGE_SIZE;
+        for page_idx in 0..heap_size_pages {
+            let virt = VirtAddr::new_canonical(KERNEL_HEAP_START + page_idx * Arch::PAGE_SIZE);
+            let flags = PageFlags::new().writable();
+            let flush = mapper.map(virt, flags).unwrap();
+            flush.ignore();
+        }
 
         mapper.make_current();
 

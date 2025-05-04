@@ -14,19 +14,8 @@ pub const KERNEL_HEAP_SIZE: usize = 1024 * 1024 * 64;
 #[global_allocator]
 static HEAP: LockedHeap<32> = LockedHeap::new();
 
-pub unsafe fn init_heap() -> Result<(), MemError> {
+pub unsafe fn init_heap() {
     unsafe {
-        let mut mapper = Mapper::current(KernelFrameAllocator);
-        let heap_size_pages = KERNEL_HEAP_SIZE / Arch::PAGE_SIZE;
-        for page_idx in 0..heap_size_pages {
-            let virt = VirtAddr::new_canonical(KERNEL_HEAP_START + page_idx * Arch::PAGE_SIZE);
-            let flags = PageFlags::new_for_data_segment();
-            let flush = mapper.map(virt, flags)?;
-            flush.flush();
-        }
-
         HEAP.lock().init(KERNEL_HEAP_START, KERNEL_HEAP_SIZE);
     }
-
-    Ok(())
 }

@@ -11,12 +11,5 @@
     "max-atomic-width": 128,
     "panic-strategy": "abort",
     "relocation-model": "static",
-    "stack-probes": {
-        "kind": "inline"
-    },
-    "supported-sanitizers": [
-        "kcfi",
-        "kernel-address"
-    ],
     "target-pointer-width": "64"
 }

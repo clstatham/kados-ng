@@ -64,7 +64,7 @@ pub fn init_boot() {
     }
 }
 
-pub fn init() {
+pub fn init_post_heap() {
     unsafe {
         let kpcr_layout = Layout::new::<Kpcr>();
         let kpcr_ptr = alloc_zeroed(kpcr_layout) as *mut Kpcr;

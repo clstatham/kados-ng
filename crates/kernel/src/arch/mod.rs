@@ -46,9 +46,9 @@ pub trait ArchTrait {
     const PAGE_ENTRY_FLAGS_MASK: usize =
         !(Self::PAGE_ENTRY_ADDR_MASK << Self::PAGE_ENTRY_ADDR_SHIFT);
 
-    unsafe fn pre_kernel_main_init();
+    unsafe fn init_pre_kernel_main();
     unsafe fn init_mem();
-    unsafe fn post_heap_init();
+    unsafe fn init_post_heap();
     unsafe fn init_interrupts();
     unsafe fn enable_interrupts();
     unsafe fn disable_interrupts();

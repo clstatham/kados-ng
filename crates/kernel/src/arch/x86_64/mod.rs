@@ -1,15 +1,11 @@
-use x86::{
-    halt,
-    msr::{IA32_PAT, wrmsr},
-    tlb,
-};
+use x86::{halt, tlb};
 use x86_64::{
     instructions::interrupts,
     registers::control::{Cr3, Cr3Flags},
     structures::paging::PhysFrame,
 };
 
-use crate::mem::units::PhysAddr;
+use crate::mem::units::{PhysAddr, VirtAddr};
 
 use super::ArchTrait;
 
@@ -49,45 +45,14 @@ impl ArchTrait for X86_64 {
 
     const PAGE_FLAG_NON_GLOBAL: usize = 0;
 
-    unsafe fn pre_kernel_main_init() {
+    unsafe fn init_pre_kernel_main() {
         gdt::init_boot();
     }
 
-    unsafe fn init_mem() {
-        let uncacheable = 0;
-        let write_combining = 1;
-        let write_through = 4;
-        //let write_protected = 5;
-        let write_back = 6;
-        let uncached = 7;
+    unsafe fn init_mem() {}
 
-        let pat0 = write_back;
-        let pat1 = write_through;
-        let pat2 = uncached;
-        let pat3 = uncacheable;
-
-        let pat4 = write_combining;
-        let pat5 = pat1;
-        let pat6 = pat2;
-        let pat7 = pat3;
-
-        unsafe {
-            wrmsr(
-                IA32_PAT,
-                pat7 << 56
-                    | pat6 << 48
-                    | pat5 << 40
-                    | pat4 << 32
-                    | pat3 << 24
-                    | pat2 << 16
-                    | pat1 << 8
-                    | pat0,
-            )
-        };
-    }
-
-    unsafe fn post_heap_init() {
-        gdt::init();
+    unsafe fn init_post_heap() {
+        gdt::init_post_heap();
     }
 
     unsafe fn init_interrupts() {
@@ -106,7 +71,7 @@ impl ArchTrait for X86_64 {
         interrupts::are_enabled()
     }
 
-    unsafe fn invalidate_page(addr: crate::mem::units::VirtAddr) {
+    unsafe fn invalidate_page(addr: VirtAddr) {
         unsafe {
             tlb::flush(addr.value());
         }
@@ -129,7 +94,7 @@ impl ArchTrait for X86_64 {
     }
 
     #[inline(always)]
-    unsafe fn set_stack_pointer(sp: crate::mem::units::VirtAddr, next_fn: usize) -> ! {
+    unsafe fn set_stack_pointer(sp: VirtAddr, next_fn: usize) -> ! {
         unsafe {
             core::arch::asm!("
                 mov rsp, {sp}
@@ -166,8 +131,8 @@ impl ArchTrait for X86_64 {
         x
     }
 
-    fn exit_qemu(code: u32) -> ! {
-        todo!()
+    fn exit_qemu(_code: u32) -> ! {
+        Self::hcf() // todo
     }
 
     fn hcf() -> ! {

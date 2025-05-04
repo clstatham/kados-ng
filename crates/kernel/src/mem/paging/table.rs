@@ -152,7 +152,7 @@ impl Debug for PageTableEntry {
 pub struct PageFlags(usize);
 
 impl PageFlags {
-    pub fn new() -> Self {
+    pub const fn new() -> Self {
         Self(
             Arch::PAGE_FLAG_PAGE_DEFAULTS
                 | Arch::PAGE_FLAG_READONLY
@@ -161,11 +161,15 @@ impl PageFlags {
         )
     }
 
-    pub fn new_table() -> Self {
+    pub const fn empty() -> Self {
+        Self(0)
+    }
+
+    pub const fn new_table() -> Self {
         Self(Arch::PAGE_FLAG_TABLE_DEFAULTS | Arch::PAGE_FLAG_NON_GLOBAL)
     }
 
-    pub fn new_for_text_segment() -> Self {
+    pub const fn new_for_text_segment() -> Self {
         Self::new().executable()
     }
 
@@ -177,19 +181,19 @@ impl PageFlags {
         Self::new().writable()
     }
 
-    pub fn from_raw(raw: usize) -> Self {
+    pub const fn from_raw(raw: usize) -> Self {
         Self(raw)
     }
 
-    pub fn raw(&self) -> usize {
+    pub const fn raw(&self) -> usize {
         self.0
     }
 
-    pub fn has_flag(&self, flag: usize) -> bool {
+    pub const fn has_flag(&self, flag: usize) -> bool {
         self.0 & flag == flag
     }
 
-    pub fn with_flag(&self, flag: usize, value: bool) -> Self {
+    pub const fn with_flag(&self, flag: usize, value: bool) -> Self {
         if value {
             Self(self.0 | flag)
         } else {
@@ -197,29 +201,29 @@ impl PageFlags {
         }
     }
 
-    pub fn is_present(&self) -> bool {
+    pub const fn is_present(&self) -> bool {
         self.has_flag(Arch::PAGE_FLAG_PRESENT)
     }
 
-    pub fn present(self) -> Self {
+    pub const fn present(self) -> Self {
         self.with_flag(Arch::PAGE_FLAG_PRESENT, true)
     }
 
-    pub fn is_executable(&self) -> bool {
+    pub const fn is_executable(&self) -> bool {
         self.0 & (Arch::PAGE_FLAG_EXECUTABLE | Arch::PAGE_FLAG_NON_EXECUTABLE)
             == Arch::PAGE_FLAG_EXECUTABLE
     }
 
-    pub fn executable(self) -> Self {
+    pub const fn executable(self) -> Self {
         self.with_flag(Arch::PAGE_FLAG_EXECUTABLE, true)
             .with_flag(Arch::PAGE_FLAG_NON_EXECUTABLE, false)
     }
 
-    pub fn is_writable(&self) -> bool {
+    pub const fn is_writable(&self) -> bool {
         self.0 & (Arch::PAGE_FLAG_READONLY | Arch::PAGE_FLAG_READWRITE) == Arch::PAGE_FLAG_READWRITE
     }
 
-    pub fn writable(self) -> Self {
+    pub const fn writable(self) -> Self {
         self.with_flag(Arch::PAGE_FLAG_READONLY | Arch::PAGE_FLAG_READWRITE, false)
             .with_flag(Arch::PAGE_FLAG_READWRITE, true)
     }

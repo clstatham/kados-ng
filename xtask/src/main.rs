@@ -8,17 +8,17 @@ use xshell::{Shell, cmd};
 
 #[derive(Subcommand, Clone, Debug, PartialEq, Eq)]
 pub enum Mode {
-    /// Build the kernel for a Raspberry Pi 4b
+    /// Build the kernel
     Build {
         #[clap(short, long, default_value_t = false)]
         release: bool,
     },
-    /// Build the kernel for a Raspberry Pi 4b and emulate it in QEMU
+    /// Build the kernel and emulate it in QEMU
     Run {
         #[clap(short, long, default_value_t = false)]
         release: bool,
     },
-    /// Build the kernel for a Raspberry Pi 4b and run it in QEMU with debug options (gdbserver)
+    /// Build the kernel and run it in QEMU with debug options (gdbserver)
     Debug {
         #[clap(short, long, default_value_t = false)]
         release: bool,
@@ -33,7 +33,7 @@ pub enum Mode {
 }
 
 #[derive(Parser)]
-#[clap(about = "Build the kernel and run it in QEMU")]
+#[clap(about = "kados-ng build tool")]
 pub struct Args {
     /// Mode of operation
     #[command(subcommand)]
@@ -586,18 +586,6 @@ impl Context {
     fn run_qemu_pc(&self, debug_adapter: bool) -> anyhow::Result<()> {
         log::info!("Running QEMU");
 
-        /*
-            qemu-system-x86_64 \
-        -M smm=off \
-        -machine q35 -cpu EPYC \
-        -D target/log.txt -d int,guest_errors -no-reboot -no-shutdown \
-        -s \
-        -serial stdio \
-        -serial file:target/fb_log.txt \
-        -m 4G \
-        -cdrom $KERNEL.iso >&2
-
-             */
         let qemu_cdrom_arg = format!("{}", self.iso_path().display());
         let mut qemu_args = vec![
             "-M",

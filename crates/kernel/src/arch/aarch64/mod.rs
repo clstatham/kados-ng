@@ -43,13 +43,13 @@ impl ArchTrait for AArch64 {
 
     const PAGE_FLAG_NON_GLOBAL: usize = 1 << 11;
 
-    unsafe fn pre_kernel_main_init() {}
+    unsafe fn init_pre_kernel_main() {}
 
     unsafe fn init_mem() {
         MAIR_EL1.set((0x44 << 8) | 0xff); // NORMAL_UNCACHED_MEMORY, NORMAL_WRITEBACK_MEMORY
     }
 
-    unsafe fn post_heap_init() {}
+    unsafe fn init_post_heap() {}
 
     unsafe fn init_interrupts() {
         unsafe {
