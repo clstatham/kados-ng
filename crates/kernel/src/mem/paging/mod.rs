@@ -41,7 +41,7 @@ pub struct MemMapEntries<const N: usize> {
     pub usable_entry_count: usize,
     pub identity_map_entries: [MemMapEntry; N],
     pub identity_map_entry_count: usize,
-    pub kernel_entry: Once<MemMapEntry>,
+    pub kernel_entry: MemMapEntry,
 }
 
 impl<const N: usize> MemMapEntries<N> {
@@ -51,7 +51,7 @@ impl<const N: usize> MemMapEntries<N> {
             usable_entry_count: 0,
             identity_map_entries: [MemMapEntry::EMPTY; N],
             identity_map_entry_count: 0,
-            kernel_entry: Once::new(),
+            kernel_entry: MemMapEntry::EMPTY,
         }
     }
 
@@ -66,11 +66,11 @@ impl<const N: usize> MemMapEntries<N> {
     }
 
     pub fn set_kernel_entry(&mut self, entry: MemMapEntry) {
-        self.kernel_entry.call_once(|| entry);
+        self.kernel_entry = entry;
     }
 
-    pub fn kernel_entry(&self) -> Option<&MemMapEntry> {
-        self.kernel_entry.get()
+    pub fn kernel_entry(&self) -> MemMapEntry {
+        self.kernel_entry
     }
 
     pub fn usable_entries(&self) -> &[MemMapEntry] {
@@ -82,7 +82,7 @@ impl<const N: usize> MemMapEntries<N> {
     }
 }
 
-pub unsafe fn map_memory() -> ! {
+pub fn map_memory() -> ! {
     let mem_map = MEM_MAP_ENTRIES.get().unwrap();
 
     unsafe {
@@ -104,7 +104,7 @@ pub unsafe fn map_memory() -> ! {
         }
 
         log::debug!("Mapping kernel");
-        let kernel_entry = mem_map.kernel_entry().unwrap();
+        let kernel_entry = mem_map.kernel_entry();
         let kernel_base = kernel_entry.base;
         let kernel_size = kernel_entry.size;
         for frame_idx in 0..kernel_size.frame_count() {

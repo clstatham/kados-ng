@@ -38,7 +38,9 @@ pub fn uptime() -> Duration {
 
 pub fn get_uptime_ns() -> usize {
     let ts = get_rt_clock();
-    (ts.tv_sec * 1000000000 + ts.tv_nsec) as usize
+    let nanos = ts.tv_sec as usize * 1000000000 + ts.tv_nsec as usize;
+    let epoch = EPOCH.load(Ordering::SeqCst);
+    nanos - epoch
 }
 
 pub fn get_uptime_ms() -> usize {
@@ -104,7 +106,8 @@ pub fn pit_irq() {
 }
 
 pub unsafe fn init(boot_time: Duration) {
-    EPOCH.store(boot_time.as_secs() as usize, Ordering::SeqCst);
+    EPOCH.store(boot_time.as_nanos() as usize, Ordering::SeqCst);
     RT_CLOCK.lock().tv_sec = boot_time.as_secs() as isize;
+    RT_CLOCK.lock().tv_nsec = boot_time.subsec_nanos() as isize;
     set_pit_frequency(PIT_FREQUENCY_HZ);
 }

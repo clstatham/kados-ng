@@ -43,21 +43,23 @@ pub struct Args {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
 pub enum Target {
-    Aarch64,
+    #[clap(name = "aarch64")]
+    AArch64,
+    #[clap(name = "x86_64")]
     X86_64,
 }
 
 impl Target {
     pub fn target_dir(&self) -> &'static str {
         match self {
-            Self::Aarch64 => "aarch64-kados",
+            Self::AArch64 => "aarch64-kados",
             Self::X86_64 => "x86_64-kados",
         }
     }
 
     pub fn arch_dir(&self) -> PathBuf {
         match self {
-            Self::Aarch64 => PathBuf::from("arch").join("aarch64"),
+            Self::AArch64 => PathBuf::from("arch").join("aarch64"),
             Self::X86_64 => PathBuf::from("arch").join("x86_64"),
         }
     }
@@ -206,7 +208,7 @@ impl Context {
             .run()?;
 
         match self.target {
-            Target::Aarch64 => {
+            Target::AArch64 => {
                 self.create_new_image_rpi()?;
 
                 self.build_dependencies_rpi()?;
@@ -259,7 +261,7 @@ impl Context {
         // proceed with build as normal
 
         match self.target {
-            Target::Aarch64 => {
+            Target::AArch64 => {
                 self.create_new_image_rpi()?;
 
                 self.build_dependencies_rpi()?;
@@ -279,7 +281,7 @@ impl Context {
 
     pub fn run_qemu(&self, debug_adapter: bool) -> anyhow::Result<()> {
         match self.target {
-            Target::Aarch64 => self.run_qemu_rpi(debug_adapter),
+            Target::AArch64 => self.run_qemu_rpi(debug_adapter),
             Target::X86_64 => self.run_qemu_pc(debug_adapter),
         }
     }

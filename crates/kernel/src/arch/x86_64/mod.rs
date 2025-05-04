@@ -99,7 +99,7 @@ impl ArchTrait for X86_64 {
             core::arch::asm!("
                 mov rsp, {sp}
                 xor rbp, rbp
-                jmp [{next_fn}]
+                jmp {next_fn}
             ", sp = in(reg) sp.value(), next_fn = sym crate::kernel_main_post_paging, options(noreturn))
         }
     }

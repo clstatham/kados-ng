@@ -123,14 +123,28 @@ pub extern "C" fn kernel_main() -> ! {
     let mem_map = MEM_MAP.get_response().unwrap();
     let mut total_free = 0;
     let mut mem_map_entries = MemMapEntries::new();
+
     for entry in mem_map.entries().iter() {
+        let description = match entry.entry_type {
+            EntryType::USABLE => "USABLE",
+            EntryType::RESERVED => "RESERVED",
+            EntryType::ACPI_NVS => "ACPI_NVS",
+            EntryType::ACPI_RECLAIMABLE => "ACPI_RECLAIMABLE",
+            EntryType::BAD_MEMORY => "BAD_MEMORY",
+            EntryType::BOOTLOADER_RECLAIMABLE => "BOOTLOADER_RECLAIMABLE",
+            EntryType::EXECUTABLE_AND_MODULES => "EXECUTABLE_AND_MODULES",
+            EntryType::FRAMEBUFFER => "FRAMEBUFFER",
+            _ => "UNKNOWN",
+        };
+        log::info!(
+            "{:#016x} .. {:#016x}  {}",
+            entry.base,
+            entry.base + entry.length,
+            description
+        );
+
         match entry.entry_type {
             EntryType::USABLE => {
-                log::info!(
-                    "usable region: {:016x} .. {:016x}",
-                    entry.base,
-                    entry.base + entry.length,
-                );
                 total_free += entry.length;
                 mem_map_entries.push_usable(MemMapEntry {
                     base: PhysAddr::new_canonical(entry.base as usize),
@@ -141,29 +155,17 @@ pub extern "C" fn kernel_main() -> ! {
             EntryType::BOOTLOADER_RECLAIMABLE
             | EntryType::ACPI_RECLAIMABLE
             | EntryType::FRAMEBUFFER => {
-                log::info!(
-                    "Reclaimable region: {:016x} .. {:016x}",
-                    entry.base,
-                    entry.base + entry.length
-                );
                 mem_map_entries.push_identity_map(MemMapEntry {
                     base: PhysAddr::new_canonical(entry.base as usize),
                     size: FrameCount::from_bytes(entry.length as usize),
                     kind: entry.entry_type,
                 });
             }
-            EntryType::EXECUTABLE_AND_MODULES => {
-                log::info!(
-                    "kernel at {:016x} .. {:016x}",
-                    entry.base,
-                    entry.base + entry.length
-                );
-                mem_map_entries.set_kernel_entry(MemMapEntry {
-                    base: PhysAddr::new_canonical(entry.base as usize),
-                    size: FrameCount::from_bytes(entry.length as usize),
-                    kind: entry.entry_type,
-                })
-            }
+            EntryType::EXECUTABLE_AND_MODULES => mem_map_entries.set_kernel_entry(MemMapEntry {
+                base: PhysAddr::new_canonical(entry.base as usize),
+                size: FrameCount::from_bytes(entry.length as usize),
+                kind: entry.entry_type,
+            }),
             _ => {}
         }
     }
@@ -173,10 +175,8 @@ pub extern "C" fn kernel_main() -> ! {
     log::info!("Adding memory map to kernel frame allocator");
     add_kernel_frames(MEM_MAP_ENTRIES.get().unwrap().usable_entries());
 
-    unsafe {
-        log::info!("Initializing memory");
-        mem::paging::map_memory()
-    }
+    log::info!("Initializing memory");
+    mem::paging::map_memory()
 }
 
 #[unsafe(no_mangle)]
@@ -192,9 +192,7 @@ pub extern "C" fn kernel_main_post_paging() -> ! {
         unsafe { core::slice::from_raw_parts(kernel_file_addr.as_raw_ptr(), kernel_file_size) };
     KERNEL_ELF.call_once(|| ElfFile::new(kernel_file_data).expect("Error parsing kernel ELF file"));
 
-    unsafe {
-        mem::heap::init_heap();
-    }
+    mem::heap::init_heap();
 
     log::info!("Initializing memory (post-heap)");
 
