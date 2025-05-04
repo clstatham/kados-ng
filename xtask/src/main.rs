@@ -27,6 +27,8 @@ pub enum Mode {
         #[clap(short, long, default_value_t = false)]
         release: bool,
     },
+    /// Run Clippy with custom target options for the kernel
+    Clippy,
 }
 
 #[derive(Parser)]
@@ -155,15 +157,15 @@ impl Context {
     }
 
     pub fn uboot_dir(&self) -> PathBuf {
-        self.target_dir().join("u-boot")
+        self.build_root.join("target").join("u-boot")
     }
 
     pub fn limine_dir(&self) -> PathBuf {
-        self.target_dir().join("limine")
+        self.build_root.join("target").join("limine")
     }
 
     pub fn rpi_firmware_dir(&self) -> PathBuf {
-        self.target_dir().join("firmware")
+        self.build_root.join("target").join("firmware")
     }
 
     pub fn iso_root_dir(&self) -> PathBuf {
@@ -197,6 +199,21 @@ impl Context {
         }
 
         cargo_args
+    }
+
+    pub fn run_clippy(&self) -> anyhow::Result<()> {
+        // log::info!("Running Clippy");
+
+        cmd!(self.sh, "cargo")
+            .args(self.cargo_args("clippy"))
+            .arg("--message-format")
+            .arg("json")
+            .env("RUSTFLAGS", self.rustflags())
+            .run()?;
+
+        // log::info!("Clippy complete!");
+
+        Ok(())
     }
 
     pub fn full_build_kernel(&self) -> anyhow::Result<()> {
@@ -614,6 +631,10 @@ fn main() -> anyhow::Result<()> {
         Mode::Flash { device, release } => {
             let cx = Context::new(args.target, release)?;
             cx.flash_rpi(device.as_str())?;
+        }
+        Mode::Clippy => {
+            let cx = Context::new(args.target, false)?;
+            cx.run_clippy()?;
         }
     }
 

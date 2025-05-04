@@ -6,14 +6,14 @@ use embedded_graphics::{
     prelude::*,
     text::Text,
 };
-use spin::{
-    Once,
-    mutex::{SpinMutex, SpinMutexGuard},
-};
+use spin::Once;
 
 pub use embedded_graphics::pixelcolor::Rgb888;
 
-use crate::mem::units::VirtAddr;
+use crate::{
+    mem::units::VirtAddr,
+    sync::{IrqMutex, IrqMutexGuard},
+};
 
 const FONT: MonoFont = ascii::FONT_8X13;
 
@@ -270,9 +270,9 @@ impl OriginDimensions for FrameBuffer {
     }
 }
 
-pub static FRAMEBUFFER: Once<SpinMutex<FrameBuffer>> = Once::new();
+pub static FRAMEBUFFER: Once<IrqMutex<FrameBuffer>> = Once::new();
 
-pub fn fb<'a>() -> SpinMutexGuard<'a, FrameBuffer> {
+pub fn fb<'a>() -> IrqMutexGuard<'a, FrameBuffer> {
     FRAMEBUFFER.get().unwrap().lock()
 }
 
@@ -285,7 +285,7 @@ pub fn render_text_buf() {
 #[macro_export]
 macro_rules! fb_print {
     ($($arg:tt)*) => ({
-        $crate::framebuffer::_fb_print(format_args!($($arg)*));
+        $crate::framebuffer::write_fmt(format_args!($($arg)*));
     });
 }
 
@@ -296,7 +296,7 @@ macro_rules! fb_println {
 }
 
 #[doc(hidden)]
-pub fn _fb_print(args: core::fmt::Arguments) {
+pub fn write_fmt(args: core::fmt::Arguments) {
     use core::fmt::Write;
     if let Some(fb) = FRAMEBUFFER.get() {
         fb.lock().write_fmt(args).unwrap();
@@ -332,7 +332,7 @@ pub fn init(fb_tag: FramebufferInfo) {
         text_fgcolor: Rgb888::WHITE,
     };
 
-    FRAMEBUFFER.call_once(|| SpinMutex::new(framebuf));
+    FRAMEBUFFER.call_once(|| IrqMutex::new(framebuf));
 
     fb().set_text_fgcolor_default();
     fb().clear_pixels();

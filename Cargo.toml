@@ -8,3 +8,7 @@ edition = "2024"
 [profile.release]
 debug = true
 lto = false
+panic = "abort"
+
+[profile.dev]
+panic = "abort"

@@ -13,6 +13,7 @@ use crate::{
         paging::{allocator::KernelFrameAllocator, mapper::Mapper},
         units::VirtAddr,
     },
+    println,
 };
 
 fn prevent_double_panic() {
@@ -24,7 +25,6 @@ fn prevent_double_panic() {
     }
 }
 
-#[cfg(not(test))]
 #[panic_handler]
 fn panic(info: &core::panic::PanicInfo) -> ! {
     prevent_double_panic();
@@ -36,21 +36,6 @@ fn panic(info: &core::panic::PanicInfo) -> ! {
     }
 
     Arch::hcf()
-}
-
-#[cfg(test)]
-#[panic_handler]
-fn panic(info: &core::panic::PanicInfo) -> ! {
-    prevent_double_panic();
-
-    println!("[failed]");
-    println!("Panic: {}", info);
-
-    if let Err(e) = unwind_kernel_stack() {
-        println!("Error unwinding stack: {}", e);
-    }
-
-    Arch::exit_qemu(1);
 }
 
 fn print_symbol(pc: usize, symtab: &[Entry64]) {

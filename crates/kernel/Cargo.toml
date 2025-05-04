@@ -14,7 +14,7 @@ buddy_system_allocator = "0.11.0"
 derive_more = {version = "2.0.1", default-features = false, features = ["full"]}
 embedded-graphics = "0.8.1"
 limine = "0.4.0"
-log = "0.4.27"
+log = {version = "0.4"}
 qemu-exit = "3.0"
 rand = {version = "0.9.1", default-features = false, features = []}
 rand_chacha = {version = "0.9.0", default-features = false}

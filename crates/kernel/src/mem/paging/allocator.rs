@@ -1,4 +1,4 @@
-use spin::{Once, mutex::SpinMutex};
+use spin::Once;
 
 use crate::{
     arch::{Arch, ArchTrait},
@@ -6,14 +6,15 @@ use crate::{
         MemError,
         units::{FrameCount, PhysAddr},
     },
+    sync::IrqMutex,
 };
 
 use super::MemMapEntry;
 
-static KERNEL_FRAME_ALLOCATOR: Once<SpinMutex<BumpFrameAllocator>> = Once::new();
+static KERNEL_FRAME_ALLOCATOR: Once<IrqMutex<BumpFrameAllocator>> = Once::new();
 
 pub fn add_kernel_frames(areas: &'static [MemMapEntry]) {
-    KERNEL_FRAME_ALLOCATOR.call_once(|| SpinMutex::new(BumpFrameAllocator::new(areas)));
+    KERNEL_FRAME_ALLOCATOR.call_once(|| IrqMutex::new(BumpFrameAllocator::new(areas)));
 }
 
 pub trait FrameAllocator {

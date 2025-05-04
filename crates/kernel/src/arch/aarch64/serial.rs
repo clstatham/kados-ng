@@ -1,7 +1,9 @@
 use core::fmt::{self, Write};
 
 use arm_pl011::Pl011Uart;
-use spin::{Once, mutex::SpinMutex};
+use spin::Once;
+
+use crate::sync::IrqMutex;
 
 const PL011_BASE: *mut u8 = 0xFE201000 as *mut u8; // RPi4 PL011 UART base address
 
@@ -16,7 +18,7 @@ impl Write for Uart {
     }
 }
 
-pub static UART: Once<SpinMutex<Uart>> = Once::new();
+pub static UART: Once<IrqMutex<Uart>> = Once::new();
 
 pub fn write_fmt(args: fmt::Arguments) {
     if let Some(uart) = UART.get() {
@@ -27,5 +29,5 @@ pub fn write_fmt(args: fmt::Arguments) {
 pub fn init() {
     let mut uart = Pl011Uart::new(PL011_BASE);
     uart.init();
-    UART.call_once(|| SpinMutex::new(Uart(uart)));
+    UART.call_once(|| IrqMutex::new(Uart(uart)));
 }

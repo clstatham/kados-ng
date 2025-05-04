@@ -1,6 +1,7 @@
 use aarch64_cpu::registers::*;
 
-use crate::{mem::units::VirtAddr, println};
+use crate::mem::units::VirtAddr;
+use crate::println;
 
 core::arch::global_asm!(
     r#"

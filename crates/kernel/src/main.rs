@@ -28,7 +28,6 @@ extern crate alloc;
 
 pub mod arch;
 pub mod logging;
-#[macro_use]
 pub mod serial;
 #[macro_use]
 pub mod framebuffer;
@@ -208,4 +207,22 @@ pub extern "C" fn kernel_main_post_paging() -> ! {
     log::info!("Welcome to KaDOS!");
 
     Arch::hcf()
+}
+
+#[macro_export]
+macro_rules! print {
+    ($($arg:tt)*) => ({
+        let _ = $crate::serial::_print(format_args!($($arg)*));
+        let _ = $crate::framebuffer::_fb_print(format_args!($($arg)*));
+    });
+}
+
+#[macro_export]
+macro_rules! println {
+    ($($arg:tt)*) => ({
+        let _ = $crate::serial::_print(format_args!($($arg)*));
+        let _ = $crate::framebuffer::write_fmt(format_args!($($arg)*));
+        $crate::serial::write_fmt(format_args!("\n"));
+        $crate::framebuffer::write_fmt(format_args!("\n"));
+    });
 }

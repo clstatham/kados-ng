@@ -6,7 +6,10 @@ use core::{
 use spin::mutex::{SpinMutex, SpinMutexGuard};
 use thiserror::Error;
 
-use crate::arch::{Arch, ArchTrait};
+use crate::{
+    arch::{Arch, ArchTrait},
+    println,
+};
 
 pub struct SavedInterruptStatus(bool);
 

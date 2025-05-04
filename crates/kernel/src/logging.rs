@@ -4,21 +4,20 @@ use embedded_graphics::{
     pixelcolor::Rgb888,
     prelude::{RgbColor, WebColors},
 };
-pub use log::*;
 
 use crate::framebuffer::{FRAMEBUFFER, render_text_buf};
 
 pub struct Logger;
 
-impl Log for Logger {
-    fn enabled(&self, _metadata: &Metadata) -> bool {
+impl log::Log for Logger {
+    fn enabled(&self, _metadata: &log::Metadata) -> bool {
         // Enable all log levels
         true
     }
 
     fn flush(&self) {}
 
-    fn log(&self, record: &Record) {
+    fn log(&self, record: &log::Record) {
         let level = record.level();
         let uptime = crate::arch::time::uptime();
         let uptime_secs = uptime.as_secs();
@@ -80,7 +79,7 @@ impl Log for Logger {
 }
 
 pub fn init() {
-    log::set_logger(&Logger).expect("Failed to set logger");
-    log::set_max_level(LevelFilter::Trace);
+    log::set_logger(&Logger).unwrap();
+    log::set_max_level(log::LevelFilter::Trace);
     log::info!("Logger initialized");
 }
