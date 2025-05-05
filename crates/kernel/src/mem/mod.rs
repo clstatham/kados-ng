@@ -1,3 +1,4 @@
+use paging::table::PageTableEntry;
 use spin::Once;
 use thiserror::Error;
 use units::{PhysAddr, VirtAddr};
@@ -34,6 +35,8 @@ pub enum MemError {
     NoNextTable,
     #[error("Virtual address {0} is not a part of the page table at {1}")]
     NotPartOfTable(VirtAddr, PhysAddr),
+    #[error("Page already mapped: {0:?}")]
+    PageAlreadyMapped(PageTableEntry),
 
     #[error("Out of physical memory")]
     OutOfMemory,

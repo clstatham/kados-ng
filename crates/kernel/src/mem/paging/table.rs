@@ -222,7 +222,7 @@ impl PageTable {
         if entry.is_unused() {
             *entry = PageTableEntry::new(frame, flags.with_flag(Arch::PAGE_FLAG_HUGE, true));
         } else {
-            // todo?
+            return Err(MemError::PageAlreadyMapped(*entry));
         }
         Ok(PageFlush::new(page))
     }
@@ -246,7 +246,7 @@ impl PageTable {
         if entry.is_unused() {
             *entry = PageTableEntry::new(frame, flags.with_flag(Arch::PAGE_FLAG_HUGE, true));
         } else {
-            // todo?
+            return Err(MemError::PageAlreadyMapped(*entry));
         }
         Ok(PageFlush::new(page))
     }
@@ -269,7 +269,7 @@ impl PageTable {
         if entry.is_unused() {
             *entry = PageTableEntry::new(frame, flags);
         } else {
-            // todo?
+            return Err(MemError::PageAlreadyMapped(*entry));
         }
         Ok(PageFlush::new(page))
     }
@@ -374,7 +374,7 @@ impl PageFlags {
     }
 
     pub const fn has_flag(&self, flag: usize) -> bool {
-        self.0 & flag == flag
+        self.0 & flag == flag && flag != 0
     }
 
     pub const fn with_flag(&self, flag: usize, value: bool) -> Self {
