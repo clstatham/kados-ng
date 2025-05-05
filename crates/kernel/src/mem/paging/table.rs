@@ -1,91 +1,290 @@
-use core::{
-    fmt::Debug,
-    ops::{Index, IndexMut},
-};
+use core::fmt::Debug;
 
 use derive_more::{BitAnd, BitOr, BitXor};
 
 use crate::{
     arch::{Arch, ArchTrait},
     mem::{
-        MemError, hhdm_physical_offset,
+        MemError,
         units::{PhysAddr, VirtAddr},
     },
 };
 
-use super::allocator::KernelFrameAllocator;
+use super::{
+    allocator::KernelFrameAllocator,
+    flush::{PageFlush, PageFlushAll},
+};
 
-#[cfg(any(target_arch = "aarch64", target_arch = "x86_64"))]
-#[derive(Clone)]
-#[repr(C, align(4096))]
-pub struct PageTable {
-    entries: [PageTableEntry; Arch::PAGE_ENTRIES],
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(usize)]
+pub enum BlockSize {
+    Page4KiB = Arch::PAGE_SHIFT,
+    Block2MiB = Arch::PAGE_SHIFT + Arch::PAGE_ENTRY_SHIFT,
+    Block1GiB = Arch::PAGE_SHIFT + Arch::PAGE_ENTRY_SHIFT * 2,
 }
 
-impl PageTable {
-    pub fn current<'a>() -> &'a mut Self {
-        unsafe { &mut *Arch::current_page_table().as_hhdm_virt().as_raw_ptr_mut() }
+impl BlockSize {
+    #[inline]
+    pub const fn size(self) -> usize {
+        1 << self as usize
     }
 
-    pub fn phys_addr(&self) -> PhysAddr {
-        PhysAddr::new_canonical(self as *const PageTable as usize - hhdm_physical_offset())
+    #[inline]
+    pub const fn mask(self) -> usize {
+        self.size() - 1
     }
 
-    pub fn zero_out(&mut self) {
-        for entry in self.entries.iter_mut() {
-            *entry = PageTableEntry::from_raw(0);
+    pub const fn pick(page: VirtAddr, frame: PhysAddr, size: usize) -> Self {
+        if page.is_aligned(BlockSize::Block1GiB.size())
+            && frame.is_aligned(BlockSize::Block1GiB.size())
+            && size >= BlockSize::Block1GiB.size()
+        {
+            BlockSize::Block1GiB
+        } else if page.is_aligned(BlockSize::Block2MiB.size())
+            && frame.is_aligned(BlockSize::Block2MiB.size())
+            && size >= BlockSize::Block2MiB.size()
+        {
+            BlockSize::Block2MiB
+        } else {
+            BlockSize::Page4KiB
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[repr(usize)]
+pub enum PageTableLevel {
+    Level1 = 1,
+    Level2 = 2,
+    Level3 = 3,
+    Level4 = 4,
+}
+
+impl PageTableLevel {
+    pub const fn next_down(self) -> Option<Self> {
+        match self {
+            Self::Level4 => Some(Self::Level3),
+            Self::Level3 => Some(Self::Level2),
+            Self::Level2 => Some(Self::Level1),
+            Self::Level1 => None,
         }
     }
 
-    pub fn next_table(&self, index: usize) -> Result<&PageTable, MemError> {
-        let ptr = self.entries[index].addr()?.as_hhdm_virt().as_raw_ptr();
-        Ok(unsafe { &*ptr })
+    pub const fn shift(self) -> usize {
+        (self as usize - 1) * Arch::PAGE_ENTRY_SHIFT + Arch::PAGE_SHIFT
+    }
+}
+
+pub struct PageTable {
+    frame: PhysAddr,
+    level: PageTableLevel,
+}
+
+impl PageTable {
+    pub fn create() -> PageTable {
+        let frame = unsafe { KernelFrameAllocator.allocate_one().expect("Out of memory") };
+        PageTable {
+            frame,
+            level: PageTableLevel::Level4,
+        }
     }
 
-    pub fn next_table_mut(&mut self, index: usize) -> Result<&mut PageTable, MemError> {
-        let ptr = self.entries[index].addr()?.as_hhdm_virt().as_raw_ptr_mut();
-        Ok(unsafe { &mut *ptr })
+    pub fn current() -> PageTable {
+        unsafe {
+            let frame = Arch::current_page_table();
+            PageTable {
+                frame,
+                level: PageTableLevel::Level4,
+            }
+        }
+    }
+
+    pub fn phys_addr(&self) -> PhysAddr {
+        self.frame
+    }
+
+    pub fn virt_addr(&self) -> VirtAddr {
+        self.frame.as_hhdm_virt()
+    }
+
+    pub unsafe fn make_current(&self) {
+        unsafe {
+            Arch::set_current_page_table(self.frame);
+        }
+    }
+
+    pub unsafe fn as_raw(&self) -> &[PageTableEntry; Arch::PAGE_ENTRIES] {
+        let virt = self.frame.as_hhdm_virt();
+        assert!(virt.is_aligned(Arch::PAGE_SIZE));
+        unsafe { &*virt.as_raw_ptr() }
+    }
+
+    pub unsafe fn as_raw_mut(&mut self) -> &mut [PageTableEntry; Arch::PAGE_ENTRIES] {
+        let virt = self.frame.as_hhdm_virt();
+        assert!(virt.is_aligned(Arch::PAGE_SIZE));
+        unsafe { &mut *virt.as_raw_ptr_mut() }
+    }
+
+    pub unsafe fn entry(&self, index: usize) -> &PageTableEntry {
+        unsafe { &self.as_raw()[index] }
+    }
+
+    pub unsafe fn entry_mut(&mut self, index: usize) -> &mut PageTableEntry {
+        unsafe { &mut self.as_raw_mut()[index] }
+    }
+
+    pub fn next_table(&self, index: usize) -> Result<PageTable, MemError> {
+        let next_level = self.level.next_down().ok_or(MemError::NoNextTable)?;
+        let entry = unsafe { self.entry(index) };
+        Ok(PageTable {
+            frame: entry.addr()?,
+            level: next_level,
+        })
     }
 
     pub fn next_table_create(
         &mut self,
         index: usize,
         insert_flags: PageFlags,
-    ) -> Result<&mut PageTable, MemError> {
-        let entry = &mut self.entries[index];
+    ) -> Result<PageTable, MemError> {
+        let next_level = self.level.next_down().ok_or(MemError::NoNextTable)?;
+        let entry = unsafe { self.entry_mut(index) };
         if entry.is_unused() {
-            let addr = unsafe { KernelFrameAllocator.allocate_one()? };
-            *entry = PageTableEntry::new(addr.value(), insert_flags);
+            let frame = unsafe { KernelFrameAllocator.allocate_one()? };
+            *entry = PageTableEntry::new(frame, insert_flags);
         } else {
             entry.insert_flags(insert_flags);
         }
 
-        self.next_table_mut(index)
+        Ok(PageTable {
+            frame: entry.addr()?,
+            level: next_level,
+        })
+    }
+
+    pub fn translate(&self, addr: VirtAddr) -> Result<PhysAddr, MemError> {
+        let p3 = self.next_table(addr.page_table_index(PageTableLevel::Level4))?;
+        let p2 = p3.next_table(addr.page_table_index(PageTableLevel::Level3))?;
+        let p1 = p2.next_table(addr.page_table_index(PageTableLevel::Level2))?;
+        unsafe {
+            p1.entry(addr.page_table_index(PageTableLevel::Level1))
+                .addr()
+        }
+    }
+
+    pub fn map_to(
+        &mut self,
+        page: VirtAddr,
+        frame: PhysAddr,
+        block_size: BlockSize,
+        flags: PageFlags,
+    ) -> Result<PageFlush, MemError> {
+        let insert_flags = PageFlags::new_table();
+        match block_size {
+            BlockSize::Block1GiB => self.map_to_1gib(page, frame, flags, insert_flags),
+            BlockSize::Block2MiB => self.map_to_2mib(page, frame, flags, insert_flags),
+            BlockSize::Page4KiB => self.map_to_4kib(page, frame, flags, insert_flags),
+        }
+    }
+
+    pub fn kernel_map_range(
+        &mut self,
+        mut page: VirtAddr,
+        mut frame: PhysAddr,
+        mut size: usize,
+        flags: PageFlags,
+    ) -> Result<PageFlushAll, MemError> {
+        while size != 0 {
+            let block_size = BlockSize::pick(page, frame, size);
+            let flush = self.map_to(page, frame, block_size, flags)?;
+            unsafe { flush.ignore() };
+
+            page = page.add(block_size.size());
+            frame = frame.add(block_size.size());
+            size -= block_size.size();
+        }
+        Ok(PageFlushAll)
+    }
+
+    fn map_to_1gib(
+        &mut self,
+        page: VirtAddr,
+        frame: PhysAddr,
+        flags: PageFlags,
+        insert_flags: PageFlags,
+    ) -> Result<PageFlush, MemError> {
+        #[cfg(target_arch = "aarch64")]
+        let flags = flags.with_flag(Arch::PAGE_FLAG_TYPE, false); // unset the "table" bit to make it a "block"
+
+        let mut p3 =
+            self.next_table_create(page.page_table_index(PageTableLevel::Level4), insert_flags)?;
+        let entry = unsafe { p3.entry_mut(page.page_table_index(PageTableLevel::Level3)) };
+        if entry.is_unused() {
+            *entry = PageTableEntry::new(frame, flags.with_flag(Arch::PAGE_FLAG_HUGE, true));
+        } else {
+            // todo?
+        }
+        Ok(PageFlush::new(page))
+    }
+
+    fn map_to_2mib(
+        &mut self,
+        page: VirtAddr,
+        frame: PhysAddr,
+        flags: PageFlags,
+        insert_flags: PageFlags,
+    ) -> Result<PageFlush, MemError> {
+        #[cfg(target_arch = "aarch64")]
+        let flags = flags.with_flag(Arch::PAGE_FLAG_TYPE, false); // unset the "table" bit to make it a "block"
+
+        let mut p3 =
+            self.next_table_create(page.page_table_index(PageTableLevel::Level4), insert_flags)?;
+        let mut p2 =
+            p3.next_table_create(page.page_table_index(PageTableLevel::Level3), insert_flags)?;
+        let entry = unsafe { p2.entry_mut(page.page_table_index(PageTableLevel::Level2)) };
+
+        if entry.is_unused() {
+            *entry = PageTableEntry::new(frame, flags.with_flag(Arch::PAGE_FLAG_HUGE, true));
+        } else {
+            // todo?
+        }
+        Ok(PageFlush::new(page))
+    }
+
+    fn map_to_4kib(
+        &mut self,
+        page: VirtAddr,
+        frame: PhysAddr,
+        flags: PageFlags,
+        insert_flags: PageFlags,
+    ) -> Result<PageFlush, MemError> {
+        let mut p3 =
+            self.next_table_create(page.page_table_index(PageTableLevel::Level4), insert_flags)?;
+        let mut p2 =
+            p3.next_table_create(page.page_table_index(PageTableLevel::Level3), insert_flags)?;
+        let mut p1 =
+            p2.next_table_create(page.page_table_index(PageTableLevel::Level2), insert_flags)?;
+        let entry = unsafe { p1.entry_mut(page.page_table_index(PageTableLevel::Level1)) };
+
+        if entry.is_unused() {
+            *entry = PageTableEntry::new(frame, flags);
+        } else {
+            // todo?
+        }
+        Ok(PageFlush::new(page))
     }
 }
 
-impl Index<usize> for PageTable {
-    type Output = PageTableEntry;
-
-    fn index(&self, index: usize) -> &Self::Output {
-        &self.entries[index]
-    }
-}
-
-impl IndexMut<usize> for PageTable {
-    fn index_mut(&mut self, index: usize) -> &mut Self::Output {
-        &mut self.entries[index]
-    }
-}
-
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 #[repr(transparent)]
 pub struct PageTableEntry(usize);
 
 impl PageTableEntry {
-    pub fn new(address: usize, flags: PageFlags) -> Self {
+    pub const UNUSED: Self = Self(0);
+
+    pub fn new(address: PhysAddr, flags: PageFlags) -> Self {
         Self(
-            (((address >> Arch::PAGE_SHIFT) & Arch::PAGE_ENTRY_ADDR_MASK)
+            (((address.value() >> Arch::PAGE_SHIFT) & Arch::PAGE_ENTRY_ADDR_MASK)
                 << Arch::PAGE_ENTRY_ADDR_SHIFT)
                 | flags.raw(),
         )
@@ -100,21 +299,19 @@ impl PageTableEntry {
     }
 
     pub fn is_unused(&self) -> bool {
-        self.0 == 0
+        self == &Self::UNUSED
     }
 
     pub fn addr(&self) -> Result<PhysAddr, MemError> {
+        if self.flags().has_flag(Arch::PAGE_FLAG_HUGE) {
+            return Err(MemError::HugePage);
+        }
         let addr = PhysAddr::new(
             ((self.0 >> Arch::PAGE_ENTRY_ADDR_SHIFT) & Arch::PAGE_ENTRY_ADDR_MASK)
                 << Arch::PAGE_SHIFT,
-        )
-        .unwrap();
+        )?;
 
-        if self.flags().is_present() {
-            Ok(addr)
-        } else {
-            Err(MemError::PageNotPresent(addr))
-        }
+        Ok(addr)
     }
 
     pub fn flags(&self) -> PageFlags {

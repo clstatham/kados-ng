@@ -5,8 +5,7 @@
     clippy::new_without_default,
     clippy::uninlined_format_args
 )]
-
-use core::sync::atomic::Ordering;
+#![feature(sync_unsafe_cell)]
 
 use arch::{Arch, ArchTrait};
 use framebuffer::FramebufferInfo;
@@ -20,7 +19,7 @@ use limine::{
 use mem::{
     paging::{
         MEM_MAP_ENTRIES, MemMapEntries, MemMapEntry,
-        allocator::{add_kernel_frames, kernel_frame_allocator},
+        allocator::{init_kernel_frame_allocator, kernel_frame_allocator},
     },
     units::{FrameCount, PhysAddr},
 };
@@ -84,7 +83,7 @@ pub extern "C" fn kernel_main() -> ! {
     unsafe { Arch::disable_interrupts() };
 
     let hhdm = HHDM.get_response().unwrap();
-    mem::HHDM_PHYSICAL_OFFSET.store(hhdm.offset() as usize, Ordering::SeqCst);
+    mem::HHDM_PHYSICAL_OFFSET.call_once(|| hhdm.offset() as usize);
 
     unsafe {
         Arch::init_pre_kernel_main();
@@ -177,7 +176,7 @@ pub extern "C" fn kernel_main() -> ! {
     MEM_MAP_ENTRIES.call_once(|| mem_map_entries);
 
     log::info!("Adding memory map to kernel frame allocator");
-    add_kernel_frames(MEM_MAP_ENTRIES.get().unwrap().usable_entries());
+    init_kernel_frame_allocator(MEM_MAP_ENTRIES.get().unwrap().usable_entries());
 
     log::info!("Initializing memory");
     mem::paging::map_memory()

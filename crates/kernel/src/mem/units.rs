@@ -4,7 +4,7 @@ use derive_more::*;
 
 use crate::arch::{Arch, ArchTrait};
 
-use super::{MemError, hhdm_physical_offset};
+use super::{MemError, hhdm_physical_offset, paging::table::PageTableLevel};
 
 #[inline]
 pub const fn canonicalize_physaddr(addr: usize) -> usize {
@@ -67,6 +67,10 @@ impl PhysAddr {
         self.0 == canonicalize_physaddr(self.0)
     }
 
+    pub const fn is_aligned(self, align: usize) -> bool {
+        self.0 % align == 0
+    }
+
     pub const fn add(self, offset: usize) -> Self {
         Self::new_canonical(self.value() + offset)
     }
@@ -77,6 +81,14 @@ impl PhysAddr {
 
     pub fn frame_index(self) -> FrameCount {
         FrameCount::from_bytes(self.value())
+    }
+
+    pub const fn align_down(self, align: usize) -> Self {
+        PhysAddr::new_canonical(self.value() / align * align)
+    }
+
+    pub const fn align_up(self, align: usize) -> Self {
+        PhysAddr::new_canonical(self.value().div_ceil(align) * align)
     }
 }
 
@@ -243,9 +255,8 @@ impl VirtAddr {
         VirtAddr::new_canonical(self.value().div_ceil(align) * align)
     }
 
-    pub const fn page_table_index(self, level: usize) -> usize {
-        ((self.value() / Arch::PAGE_SIZE) >> (Arch::PAGE_ENTRY_SHIFT * level))
-            & Arch::PAGE_ENTRY_MASK
+    pub const fn page_table_index(self, level: PageTableLevel) -> usize {
+        (self.value() >> level.shift()) & Arch::PAGE_ENTRY_MASK
     }
 }
 

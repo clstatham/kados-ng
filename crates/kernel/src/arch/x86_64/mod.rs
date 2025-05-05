@@ -45,6 +45,8 @@ impl ArchTrait for X86_64 {
 
     const PAGE_FLAG_NON_GLOBAL: usize = 0;
 
+    const PAGE_FLAG_HUGE: usize = 1 << 7;
+
     unsafe fn init_pre_kernel_main() {
         gdt::init_boot();
     }
@@ -85,7 +87,7 @@ impl ArchTrait for X86_64 {
 
     unsafe fn current_page_table() -> PhysAddr {
         let (cr3, _) = Cr3::read();
-        unsafe { PhysAddr::new_unchecked(cr3.start_address().as_u64() as usize) }
+        PhysAddr::new_canonical(cr3.start_address().as_u64() as usize)
     }
 
     unsafe fn set_current_page_table(addr: PhysAddr) {

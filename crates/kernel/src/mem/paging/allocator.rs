@@ -14,7 +14,7 @@ use super::MemMapEntry;
 
 static KERNEL_FRAME_ALLOCATOR: Once<IrqMutex<FrameAllocator>> = Once::new();
 
-pub fn add_kernel_frames(areas: &'static [MemMapEntry]) {
+pub fn init_kernel_frame_allocator(areas: &'static [MemMapEntry]) {
     KERNEL_FRAME_ALLOCATOR.call_once(|| IrqMutex::new(FrameAllocator::boot(areas)));
 }
 
@@ -32,10 +32,6 @@ pub enum FrameAllocator {
 impl FrameAllocator {
     pub fn boot(areas: &'static [MemMapEntry]) -> Self {
         Self::Boot(BumpFrameAllocator::new(areas))
-    }
-
-    pub fn new_post_heap() -> Self {
-        Self::PostHeap(Box::new(BuddySystemFrameAllocator::const_default()))
     }
 
     pub fn convert_post_heap(&mut self) -> Result<(), MemError> {
@@ -81,6 +77,25 @@ impl FrameAllocator {
             Self::PostHeap(buddy) => unsafe { buddy.allocate(count) },
         }
     }
+
+    pub fn free(&mut self, start: PhysAddr, count: FrameCount) -> Result<(), MemError> {
+        match self {
+            Self::Boot(_) => {
+                log::debug!(
+                    "free({start:?}, {count:?}) called on bump allocator, which does nothing"
+                );
+                Ok(())
+            }
+            Self::PostHeap(buddy) => buddy.free(start, count),
+        }
+    }
+
+    pub fn usage(&self) -> Option<FrameCount> {
+        match self {
+            Self::Boot(bump) => Some(bump.usage()),
+            Self::PostHeap(_) => None,
+        }
+    }
 }
 
 pub struct KernelFrameAllocator;
@@ -92,6 +107,10 @@ impl KernelFrameAllocator {
 
     pub unsafe fn allocate_one(&mut self) -> Result<PhysAddr, MemError> {
         unsafe { self.allocate(FrameCount::new(1)) }
+    }
+
+    pub fn usage(&self) -> Option<FrameCount> {
+        kernel_frame_allocator().lock().usage()
     }
 }
 
@@ -135,15 +154,11 @@ impl BumpFrameAllocator {
         let mut total = 0;
         let num_consumed = self.original.len() - self.areas.len();
         for area in &self.original[..num_consumed] {
-            total += area.size.frame_count();
+            total += area.size.to_bytes();
         }
-        let Some(first) = self.areas.first() else {
-            return FrameCount::new(total);
-        };
-        let size = first.size.to_bytes() - self.bump;
-        total += size / Arch::PAGE_SIZE;
+        total += self.bump;
 
-        FrameCount::new(total)
+        FrameCount::from_bytes(total)
     }
 }
 
@@ -175,5 +190,11 @@ impl BuddySystemFrameAllocator {
         } else {
             Err(MemError::OutOfMemory)
         }
+    }
+
+    pub fn free(&mut self, start: PhysAddr, count: FrameCount) -> Result<(), MemError> {
+        self.allocator
+            .dealloc(start.frame_index().frame_index(), count.frame_count());
+        Ok(())
     }
 }

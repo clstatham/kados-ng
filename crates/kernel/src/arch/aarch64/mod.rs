@@ -13,6 +13,11 @@ pub mod vectors;
 
 pub struct AArch64;
 
+impl AArch64 {
+    pub const PAGE_FLAG_TYPE: usize = 1 << 1;
+    pub const PAGE_FLAG_ACCESS: usize = 1 << 10;
+}
+
 impl ArchTrait for AArch64 {
     const PAGE_SHIFT: usize = 12;
 
@@ -22,10 +27,11 @@ impl ArchTrait for AArch64 {
 
     const PAGE_ENTRY_ADDR_WIDTH: usize = 40;
 
-    const PAGE_FLAG_PAGE_DEFAULTS: usize = Self::PAGE_FLAG_PRESENT | 1 << 1 | 1 << 10;
+    const PAGE_FLAG_PAGE_DEFAULTS: usize =
+        Self::PAGE_FLAG_PRESENT | Self::PAGE_FLAG_TYPE | Self::PAGE_FLAG_ACCESS;
 
     const PAGE_FLAG_TABLE_DEFAULTS: usize =
-        Self::PAGE_FLAG_PRESENT | Self::PAGE_FLAG_READWRITE | 1 << 1;
+        Self::PAGE_FLAG_PRESENT | Self::PAGE_FLAG_READWRITE | Self::PAGE_FLAG_TYPE;
 
     const PAGE_FLAG_PRESENT: usize = 1 << 0;
 
@@ -42,6 +48,8 @@ impl ArchTrait for AArch64 {
     const PAGE_FLAG_GLOBAL: usize = 0;
 
     const PAGE_FLAG_NON_GLOBAL: usize = 1 << 11;
+
+    const PAGE_FLAG_HUGE: usize = 0;
 
     unsafe fn init_pre_kernel_main() {}
 

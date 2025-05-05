@@ -3,16 +3,13 @@ use core::sync::atomic::{AtomicBool, Ordering};
 use thiserror::Error;
 use xmas_elf::{
     sections::{SectionData, ShType},
-    symbol_table::{Entry, Entry64},
+    symbol_table::Entry,
 };
 
 use crate::{
     KERNEL_ELF,
     arch::{Arch, ArchTrait},
-    mem::{
-        paging::{allocator::KernelFrameAllocator, mapper::Mapper},
-        units::VirtAddr,
-    },
+    mem::{paging::table::PageTable, units::VirtAddr},
     println,
 };
 
@@ -36,27 +33,6 @@ fn panic(info: &core::panic::PanicInfo) -> ! {
     }
 
     Arch::hcf()
-}
-
-fn print_symbol(pc: usize, symtab: &[Entry64]) {
-    let kernel_elf = KERNEL_ELF.get().unwrap();
-    let mut name = None;
-    for entry in symtab.iter() {
-        let value = entry.value() as usize;
-        let size = entry.size() as usize;
-
-        if pc >= value && pc < (value + size) {
-            name = entry.get_name(kernel_elf).ok();
-            break;
-        }
-    }
-
-    if let Some(name) = name {
-        rustc_demangle::demangle(name).as_str();
-        println!("       {}", name);
-    } else {
-        println!("       <unknown>");
-    }
 }
 
 #[derive(Debug, Error)]
@@ -102,7 +78,7 @@ pub fn unwind_kernel_stack() -> Result<(), UnwindStackError> {
         return Ok(());
     }
 
-    let mapper = unsafe { Mapper::current() };
+    let mapper = PageTable::current();
 
     println!("---BEGIN BACKTRACE---");
     for depth in 0..64 {
@@ -121,7 +97,22 @@ pub fn unwind_kernel_stack() -> Result<(), UnwindStackError> {
                     break;
                 } else {
                     println!("{:>2}: FP={} PC={}", depth, fp_va, pc_va);
-                    print_symbol(pc, symtab);
+                    let mut name = None;
+                    for entry in symtab.iter() {
+                        let value = entry.value() as usize;
+                        let size = entry.size() as usize;
+
+                        if pc >= value && pc < (value + size) {
+                            name = entry.get_name(kernel_elf).ok();
+                            break;
+                        }
+                    }
+
+                    if let Some(name) = name {
+                        println!("       {}", rustc_demangle::demangle(name));
+                    } else {
+                        println!("       <unknown>");
+                    }
 
                     fp = unsafe { *fp_va.as_raw_ptr::<usize>() };
                     pc_ptr_opt = fp

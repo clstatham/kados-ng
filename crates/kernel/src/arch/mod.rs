@@ -31,6 +31,7 @@ pub trait ArchTrait {
     const PAGE_FLAG_NON_EXECUTABLE: usize;
     const PAGE_FLAG_GLOBAL: usize;
     const PAGE_FLAG_NON_GLOBAL: usize;
+    const PAGE_FLAG_HUGE: usize;
 
     const PAGE_SIZE: usize = 1 << Self::PAGE_SHIFT;
     const PAGE_OFFSET_MASK: usize = Self::PAGE_SIZE - 1;

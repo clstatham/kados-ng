@@ -1,5 +1,4 @@
-use core::sync::atomic::{AtomicUsize, Ordering};
-
+use spin::Once;
 use thiserror::Error;
 use units::{PhysAddr, VirtAddr};
 
@@ -7,10 +6,11 @@ pub mod heap;
 pub mod paging;
 pub mod units;
 
-pub static HHDM_PHYSICAL_OFFSET: AtomicUsize = AtomicUsize::new(0);
+pub static HHDM_PHYSICAL_OFFSET: Once<usize> = Once::new();
 
+#[inline(always)]
 pub fn hhdm_physical_offset() -> usize {
-    HHDM_PHYSICAL_OFFSET.load(Ordering::SeqCst)
+    unsafe { *HHDM_PHYSICAL_OFFSET.get().unwrap_unchecked() }
 }
 
 #[derive(Debug, Error)]
@@ -26,6 +26,8 @@ pub enum MemError {
 
     #[error("Page not present at {0}")]
     PageNotPresent(PhysAddr),
+    #[error("Entry is huge page")]
+    HugePage,
     #[error("Invalid page table index: {0}")]
     InvalidPageTableIndex(usize),
     #[error("Cannot go lower than page table level 0")]
