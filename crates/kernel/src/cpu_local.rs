@@ -23,7 +23,7 @@ impl CpuLocalBlock {
         }
     }
 
-    pub fn current() -> &'static Self {
-        unsafe { Arch::current_cpu_local_block().deref().unwrap() }
+    pub fn current() -> Option<&'static Self> {
+        unsafe { Arch::current_cpu_local_block().deref().ok() }
     }
 }

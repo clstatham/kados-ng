@@ -26,6 +26,12 @@ impl PageFlush {
 pub struct PageFlushAll;
 
 impl PageFlushAll {
+    pub fn flush(self) {
+        unsafe {
+            Arch::invalidate_all();
+        }
+    }
+
     pub unsafe fn ignore(self) {
         core::mem::forget(self);
     }

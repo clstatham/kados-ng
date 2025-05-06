@@ -8,7 +8,7 @@ use embedded_graphics::{
 };
 use spin::Once;
 
-pub use embedded_graphics::pixelcolor::Rgb888;
+pub use embedded_graphics::pixelcolor::Bgr888 as Color;
 
 use crate::{
     mem::units::VirtAddr,
@@ -23,20 +23,20 @@ pub const TEXT_BUFFER_HEIGHT: usize = 25;
 #[derive(Clone, Copy)]
 pub struct FbChar {
     char: u8,
-    fg: Rgb888,
+    fg: Color,
 }
 
 impl FbChar {
     pub const DEFAULT: Self = Self {
         char: b' ',
-        fg: Rgb888::BLACK,
+        fg: Color::BLACK,
     };
 
-    pub fn new(char: u8, fg: Rgb888) -> Self {
+    pub fn new(char: u8, fg: Color) -> Self {
         Self { char, fg }
     }
 
-    pub fn to_text(&self, top_left: Point, x: usize, y: usize) -> Text<MonoTextStyle<Rgb888>> {
+    pub fn to_text(&self, top_left: Point, x: usize, y: usize) -> Text<MonoTextStyle<Color>> {
         Text::new(
             core::str::from_utf8(core::slice::from_ref(&self.char)).unwrap_or(" "),
             top_left
@@ -58,7 +58,7 @@ pub struct FrameBuffer {
     text_buf: Box<[[Option<FbChar>; TEXT_BUFFER_WIDTH]; TEXT_BUFFER_HEIGHT]>,
     text_cursor_x: usize,
     text_cursor_y: usize,
-    text_fgcolor: Rgb888,
+    text_fgcolor: Color,
 }
 
 impl FrameBuffer {
@@ -74,12 +74,12 @@ impl FrameBuffer {
         self.bpp
     }
 
-    pub fn set_text_fgcolor(&mut self, color: Rgb888) {
+    pub fn set_text_fgcolor(&mut self, color: Color) {
         self.text_fgcolor = color;
     }
 
     pub fn set_text_fgcolor_default(&mut self) {
-        self.text_fgcolor = Rgb888::WHITE;
+        self.text_fgcolor = Color::WHITE;
     }
 
     pub fn render_text_buf(&mut self) {
@@ -95,7 +95,7 @@ impl FrameBuffer {
     }
 
     pub fn clear_pixels(&mut self) {
-        self.clear(Rgb888::BLACK).unwrap();
+        self.clear(Color::BLACK).unwrap();
     }
 
     pub fn frame_mut(&mut self) -> &mut [u32] {
@@ -240,7 +240,7 @@ impl core::fmt::Write for FrameBuffer {
 }
 
 impl DrawTarget for FrameBuffer {
-    type Color = Rgb888;
+    type Color = Color;
     type Error = core::convert::Infallible;
 
     fn draw_iter<I>(&mut self, pixels: I) -> Result<(), Self::Error>
@@ -329,7 +329,7 @@ pub fn init(fb_tag: FramebufferInfo) {
         text_buf: Box::new([[None; TEXT_BUFFER_WIDTH]; TEXT_BUFFER_HEIGHT]),
         text_cursor_x: 0,
         text_cursor_y: 0,
-        text_fgcolor: Rgb888::WHITE,
+        text_fgcolor: Color::WHITE,
     };
 
     FRAMEBUFFER.call_once(|| IrqMutex::new(framebuf));

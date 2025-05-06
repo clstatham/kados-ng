@@ -1,6 +1,7 @@
 use core::arch::asm;
 
 use aarch64_cpu::registers::*;
+use limine::request::DeviceTreeBlobRequest;
 
 use crate::{
     cpu_local::CpuLocalBlock,
@@ -12,6 +13,7 @@ use crate::{
 
 use super::ArchTrait;
 
+pub mod gic;
 pub mod random;
 pub mod serial;
 pub mod syscall;
@@ -67,9 +69,11 @@ impl ArchTrait for AArch64 {
 
     unsafe fn init_post_heap() {}
 
+    #[inline(never)]
     unsafe fn init_interrupts() {
         unsafe {
-            super::vectors::init();
+            vectors::init();
+            gic::init();
         }
     }
 

@@ -7,6 +7,7 @@
 )]
 
 use arch::{Arch, ArchTrait};
+use cpu_local::CpuLocalBlock;
 use framebuffer::FramebufferInfo;
 use limine::{
     memory_map::EntryType,
@@ -23,7 +24,10 @@ use mem::{
     units::{FrameCount, PhysAddr},
 };
 use spin::Once;
-use task::switch::SwitchResult;
+use task::{
+    context::{CONTEXTS, Context, ContextRef},
+    switch::SwitchResult,
+};
 use xmas_elf::ElfFile;
 
 extern crate alloc;
@@ -72,6 +76,7 @@ macro_rules! elf_offsets {
 
 elf_offsets!(
     __text_start,
+    __exception_vectors,
     __text_end,
     __rodata_start,
     __rodata_end,
@@ -109,11 +114,6 @@ pub extern "C" fn kernel_main() -> ! {
     let kernel_elf_physaddr = kernel_file.addr() as usize - hhdm.offset() as usize;
     KERNEL_ELF_PHYSADDR.call_once(|| PhysAddr::new_canonical(kernel_elf_physaddr));
     KERNEL_ELF_SIZE.call_once(|| kernel_file.size() as usize);
-
-    unsafe {
-        Arch::init_interrupts();
-        Arch::enable_interrupts();
-    }
 
     let fb_tag = FRAMEBUFFER_REQUEST.get_response().unwrap();
     let fb0 = fb_tag.framebuffers().next().unwrap();
@@ -185,7 +185,6 @@ pub extern "C" fn kernel_main() -> ! {
     mem::paging::map_memory()
 }
 
-#[unsafe(no_mangle)]
 pub extern "C" fn kernel_main_post_paging() -> ! {
     unsafe {
         Arch::invalidate_all();
@@ -197,6 +196,12 @@ pub extern "C" fn kernel_main_post_paging() -> ! {
     let kernel_file_data =
         unsafe { core::slice::from_raw_parts(kernel_file_addr.as_raw_ptr(), kernel_file_size) };
     KERNEL_ELF.call_once(|| ElfFile::new(kernel_file_data).expect("Error parsing kernel ELF file"));
+
+    log::info!("Initializing interrupts");
+
+    unsafe {
+        Arch::init_interrupts();
+    }
 
     log::info!("Initializing per-cpu structure");
     unsafe {
@@ -220,27 +225,26 @@ pub extern "C" fn kernel_main_post_paging() -> ! {
     log::info!("Initializing first context");
     task::context::init();
 
-    log::info!("Kernel boot finished after {:?}", arch::time::uptime());
-
-    log::info!("Welcome to KaDOS!");
-
     task::spawn(false, test).unwrap();
 
+    log::info!("Kernel boot finished after {:?}", arch::time::uptime());
+    log::info!("Welcome to KaDOS!");
+
     loop {
-        match task::switch::switch() {
-            SwitchResult::Switched => unsafe {
-                Arch::enable_interrupts();
-            },
-            SwitchResult::AllIdle => unsafe {
-                Arch::enable_interrupts();
-                Arch::halt();
-            },
+        unsafe {
+            Arch::enable_interrupts();
+            Arch::halt();
         }
     }
 }
 
 extern "C" fn test() {
-    log::info!("HELLO!!!!");
+    log::warn!("This should only run once!");
+
+    let cx = task::context::current().unwrap();
+    CONTEXTS.write().remove(&ContextRef(cx));
+    task::switch::switch();
+    unreachable!()
 }
 
 #[macro_export]

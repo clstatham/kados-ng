@@ -1,7 +1,7 @@
 use core::sync::atomic::{AtomicUsize, Ordering};
 
 use alloc::{collections::btree_set::BTreeSet, sync::Arc};
-use derive_more::Deref;
+use derive_more::{Deref, Display};
 use spin::RwLock;
 use spinning_top::RwSpinlock;
 
@@ -24,7 +24,7 @@ pub fn init() {
     let cx_lock = Arc::new(RwSpinlock::new(cx));
     CONTEXTS.write().insert(ContextRef(cx_lock.clone()));
 
-    let block = CpuLocalBlock::current();
+    let block = CpuLocalBlock::current().unwrap();
     block.switch_state.set_current_context(cx_lock.clone());
     block.switch_state.set_idle_context(cx_lock);
 }
@@ -40,7 +40,7 @@ pub enum Status {
 #[derive(Debug, PartialEq, Eq)]
 pub enum BlockReason {}
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Display)]
 pub struct Pid(usize);
 
 impl Pid {
@@ -99,12 +99,13 @@ impl PartialOrd for ContextRef {
 
 pub fn current() -> Option<Arc<RwSpinlock<Context>>> {
     CpuLocalBlock::current()
-        .switch_state
-        .with_context(|cx| cx.map(Arc::clone))
+        .and_then(|block| block.switch_state.with_context(|cx| cx.map(Arc::clone)))
 }
 
 pub fn is_current(cx: &Arc<RwSpinlock<Context>>) -> bool {
-    CpuLocalBlock::current()
-        .switch_state
-        .with_context(|cur| cur.is_some_and(|cur| Arc::ptr_eq(cx, cur)))
+    CpuLocalBlock::current().is_some_and(|block| {
+        block
+            .switch_state
+            .with_context(|cur| cur.is_some_and(|cur| Arc::ptr_eq(cx, cur)))
+    })
 }

@@ -50,6 +50,7 @@ impl ArchContext {
 
 pub unsafe fn switch_to(prev: &mut Context, next: &mut Context) {
     CpuLocalBlock::current()
+        .unwrap()
         .next_addr_space
         .set(next.addr_space.clone());
 

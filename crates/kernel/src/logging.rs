@@ -1,11 +1,12 @@
 use core::fmt::Write;
 
-use embedded_graphics::{
-    pixelcolor::Rgb888,
-    prelude::{RgbColor, WebColors},
-};
+use alloc::{format, string::String};
+use embedded_graphics::prelude::{RgbColor, WebColors};
 
-use crate::framebuffer::{FRAMEBUFFER, render_text_buf};
+use crate::{
+    framebuffer::{Color, FRAMEBUFFER, render_text_buf},
+    task::context,
+};
 
 pub struct Logger;
 
@@ -22,6 +23,13 @@ impl log::Log for Logger {
         let uptime = crate::arch::time::uptime();
         let uptime_secs = uptime.as_secs();
         let uptime_subsec_nanos = uptime.subsec_nanos();
+        let pid = match context::current() {
+            Some(cx) => match cx.try_read() {
+                Some(cx) => format!("[{}] ", cx.pid),
+                None => String::new(),
+            },
+            None => String::new(),
+        };
 
         let level_str = match level {
             log::Level::Error => "ERR",
@@ -40,10 +48,11 @@ impl log::Log for Logger {
         let reset = "\x1b[0m"; // Reset color
         let target = record.target().split("::").last().unwrap_or("");
         crate::serial::write_fmt(format_args!(
-            "{}[{}]{} [{}.{:09}] [{}] {}\n",
+            "{}[{}]{} {}[{}.{:09}] [{}] {}\n",
             color,
             level_str,
             reset,
+            pid,
             uptime_secs,
             uptime_subsec_nanos,
             target,
@@ -55,17 +64,18 @@ impl log::Log for Logger {
             fb.set_text_fgcolor_default();
             fb.write_fmt(format_args!("[")).ok();
             let color = match level {
-                log::Level::Error => Rgb888::RED,
-                log::Level::Warn => Rgb888::YELLOW,
-                log::Level::Info => Rgb888::GREEN,
-                log::Level::Debug => Rgb888::BLUE,
-                log::Level::Trace => Rgb888::CSS_LIGHT_GRAY,
+                log::Level::Error => Color::RED,
+                log::Level::Warn => Color::YELLOW,
+                log::Level::Info => Color::GREEN,
+                log::Level::Debug => Color::BLUE,
+                log::Level::Trace => Color::CSS_LIGHT_GRAY,
             };
             fb.set_text_fgcolor(color);
             fb.write_fmt(format_args!("{level_str}")).ok();
             fb.set_text_fgcolor_default();
             fb.write_fmt(format_args!(
-                "] [{}.{:09}] [{}] {}\n",
+                "] {}[{}.{:09}] [{}] {}\n",
+                pid,
                 uptime_secs,
                 uptime_subsec_nanos,
                 target,

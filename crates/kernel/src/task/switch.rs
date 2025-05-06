@@ -11,7 +11,7 @@ use spinning_top::{RwSpinlock, guard::ArcRwSpinlockWriteGuard};
 use crate::{
     arch::{Arch, ArchTrait, task::switch_to},
     cpu_local::CpuLocalBlock,
-    mem::{paging::table::TableKind, units::PhysAddr},
+    mem::units::PhysAddr,
     task::context::Status,
 };
 
@@ -64,7 +64,7 @@ impl CpuLocalSwitchState {
 }
 
 pub unsafe extern "C" fn switch_finish_hook() {
-    if let Some(guards) = CpuLocalBlock::current().switch_state.result.take() {
+    if let Some(guards) = CpuLocalBlock::current().unwrap().switch_state.result.take() {
         drop(guards);
     } else {
         unreachable!();
@@ -78,7 +78,7 @@ pub unsafe extern "C" fn switch_finish_hook() {
 }
 
 pub unsafe fn switch_arch_hook() {
-    let block = CpuLocalBlock::current();
+    let block = CpuLocalBlock::current().unwrap();
 
     let current_addr_space = block.current_addr_space.borrow();
     let next_addr_space = block.next_addr_space.take();
@@ -100,14 +100,8 @@ pub unsafe fn switch_arch_hook() {
         let next = next.read();
         unsafe {
             next.table.make_current();
+            Arch::invalidate_all();
         }
-    } else {
-        unsafe {
-            Arch::set_current_page_table(empty_cr3(), TableKind::User);
-        }
-    }
-    unsafe {
-        Arch::invalidate_all();
     }
 }
 
@@ -124,10 +118,10 @@ fn is_runnable(cx: &mut Context) -> bool {
 }
 
 pub fn switch() -> SwitchResult {
-    let block = CpuLocalBlock::current();
+    let block = CpuLocalBlock::current().unwrap();
 
     while SWITCH_LOCK
-        .compare_exchange_weak(false, true, Ordering::SeqCst, Ordering::Relaxed)
+        .compare_exchange(false, true, Ordering::SeqCst, Ordering::Relaxed)
         .is_err()
     {
         core::hint::spin_loop();
@@ -195,6 +189,7 @@ pub fn switch() -> SwitchResult {
 
         SwitchResult::Switched
     } else {
+        SWITCH_LOCK.store(false, Ordering::SeqCst);
         SwitchResult::AllIdle
     }
 }

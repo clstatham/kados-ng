@@ -125,6 +125,12 @@ pub fn map_memory() -> ! {
                 .map_to(virt, phys, BlockSize::Page4KiB, flags)
                 .unwrap();
             flush.ignore();
+
+            let virt = phys.as_hhdm_virt();
+            let flush = mapper
+                .map_to(virt, phys, BlockSize::Page4KiB, flags)
+                .unwrap();
+            flush.ignore();
         }
 
         log::debug!("Mapping new kernel stack");

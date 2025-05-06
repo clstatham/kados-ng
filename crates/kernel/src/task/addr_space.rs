@@ -14,6 +14,7 @@ pub struct AddrSpace {
 impl AddrSpace {
     pub fn current() -> Result<Arc<AddrSpaceLock>, Errno> {
         CpuLocalBlock::current()
+            .unwrap()
             .current_addr_space
             .borrow()
             .clone()
@@ -26,7 +27,7 @@ impl AddrSpace {
         })
     }
 
-    pub fn new_kernel() -> Result<Self, Errno> {
+    pub fn kernel() -> Result<Self, Errno> {
         Ok(Self {
             table: PageTable::current(TableKind::Kernel),
         })
@@ -43,8 +44,8 @@ impl AddrSpaceLock {
         Ok(Arc::new(Self { lock }))
     }
 
-    pub fn new_kernel() -> Result<Arc<Self>, Errno> {
-        let lock = RwLock::new(AddrSpace::new_kernel()?);
+    pub fn kernel() -> Result<Arc<Self>, Errno> {
+        let lock = RwLock::new(AddrSpace::kernel()?);
         Ok(Arc::new(Self { lock }))
     }
 

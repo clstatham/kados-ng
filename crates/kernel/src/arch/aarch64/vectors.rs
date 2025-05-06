@@ -2,6 +2,7 @@ use aarch64_cpu::registers::*;
 
 use crate::mem::units::VirtAddr;
 use crate::println;
+use crate::task::switch::switch;
 
 core::arch::global_asm!(
     r#"
@@ -345,8 +346,9 @@ exception_stack!(__sync_current_el_sp0, |stack| {
     panic!("{}", stringify!(__sync_current_el_sp0))
 });
 exception_stack!(__irq_current_el_sp0, |stack| {
-    stack.dump();
-    panic!("{}", stringify!(__irq_current_el_sp0))
+    let id = super::gic::irq_num();
+    handle_irq(id);
+    super::gic::eoi(id);
 });
 exception_stack!(__fiq_current_el_sp0, |stack| {
     stack.dump();
@@ -380,8 +382,10 @@ exception_stack!(__sync_current_el_spx, |stack| {
     panic!("{}", stringify!(__sync_current_el_spx))
 });
 exception_stack!(__irq_current_el_spx, |stack| {
-    stack.dump();
-    panic!("{}", stringify!(__irq_current_el_spx))
+    let id = super::gic::irq_num();
+    handle_irq(id);
+    super::gic::eoi(id);
+    // panic!("{}", stringify!(__irq_current_el_spx))
 });
 exception_stack!(__fiq_current_el_spx, |stack| {
     stack.dump();
@@ -444,4 +448,15 @@ fn access_flag_fault(_faulted_addr: VirtAddr, caused_by_write: bool, _dfsc: usiz
 fn unhandled_fault(_faulted_addr: VirtAddr, caused_by_write: bool, dfsc: usize) {
     log::error!("Unhandled fault (write = {caused_by_write})");
     log::error!("dfsc: {dfsc:#b}");
+}
+
+fn handle_irq(irq: u32) {
+    match irq {
+        30 => {}
+        1023 | 1022 => {
+            CNTP_TVAL_EL0.set(CNTFRQ_EL0.get() * 3 / 1_000_000);
+            switch();
+        }
+        _ => {}
+    }
 }

@@ -1,5 +1,5 @@
 arm_64bit=1
 enable_uart=1
 kernel=u-boot.bin
-framebuffer_width=800
+framebuffer_width=640
 framebuffer_height=480

@@ -13,6 +13,7 @@ test = false
 buddy_system_allocator = "0.11.0"
 derive_more = {version = "2.0.1", default-features = false, features = ["full"]}
 embedded-graphics = "0.8.1"
+fdt-rs = {version = "0.4", default-features = false}
 limine = "0.4.0"
 log = {version = "0.4"}
 qemu-exit = "3.0"
@@ -29,6 +30,7 @@ xmas-elf = "0.10.0"
 [target.'cfg(target_arch = "aarch64")'.dependencies]
 aarch64-cpu = "10.0.0"
 arm_pl011 = "0.1"
+bcm2711-lpa = "0.5.0"
 
 [target.'cfg(target_arch = "x86_64")'.dependencies]
 pic8259 = "0.11.0"

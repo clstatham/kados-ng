@@ -23,7 +23,7 @@ pub fn spawn(user: bool, entry_func: extern "C" fn()) -> Result<Arc<RwSpinlock<C
         let addr_space = if user {
             AddrSpaceLock::new()?
         } else {
-            AddrSpaceLock::new_kernel()?
+            AddrSpaceLock::kernel()?
         };
         let _ = cx.addr_space.replace(addr_space);
         cx.arch.setup_initial_call(&stack, entry_func, user);
