@@ -1,4 +1,7 @@
-use core::fmt::Debug;
+use core::{
+    fmt::Debug,
+    ops::{Index, IndexMut},
+};
 
 use derive_more::{BitAnd, BitOr, BitXor};
 
@@ -34,7 +37,7 @@ impl BlockSize {
         self.size() - 1
     }
 
-    pub const fn pick(page: VirtAddr, frame: PhysAddr, size: usize) -> Self {
+    pub const fn largest_aligned(page: VirtAddr, frame: PhysAddr, size: usize) -> Self {
         if page.is_aligned(BlockSize::Block1GiB.size())
             && frame.is_aligned(BlockSize::Block1GiB.size())
             && size >= BlockSize::Block1GiB.size()
@@ -75,26 +78,54 @@ impl PageTableLevel {
     }
 }
 
+#[repr(C, align(4096))]
+pub struct RawPageTable {
+    entries: [PageTableEntry; Arch::PAGE_ENTRIES],
+}
+
+impl Index<usize> for RawPageTable {
+    type Output = PageTableEntry;
+
+    fn index(&self, index: usize) -> &Self::Output {
+        &self.entries[index]
+    }
+}
+
+impl IndexMut<usize> for RawPageTable {
+    fn index_mut(&mut self, index: usize) -> &mut Self::Output {
+        &mut self.entries[index]
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TableKind {
+    User,
+    Kernel,
+}
+
 pub struct PageTable {
     frame: PhysAddr,
     level: PageTableLevel,
+    kind: TableKind,
 }
 
 impl PageTable {
-    pub fn create() -> PageTable {
+    pub fn create(kind: TableKind) -> PageTable {
         let frame = unsafe { KernelFrameAllocator.allocate_one().expect("Out of memory") };
         PageTable {
             frame,
             level: PageTableLevel::Level4,
+            kind,
         }
     }
 
-    pub fn current() -> PageTable {
+    pub fn current(kind: TableKind) -> PageTable {
         unsafe {
-            let frame = Arch::current_page_table();
+            let frame = Arch::current_page_table(kind);
             PageTable {
                 frame,
                 level: PageTableLevel::Level4,
+                kind,
             }
         }
     }
@@ -109,17 +140,17 @@ impl PageTable {
 
     pub unsafe fn make_current(&self) {
         unsafe {
-            Arch::set_current_page_table(self.frame);
+            Arch::set_current_page_table(self.frame, self.kind);
         }
     }
 
-    pub unsafe fn as_raw(&self) -> &[PageTableEntry; Arch::PAGE_ENTRIES] {
+    pub unsafe fn as_raw(&self) -> &RawPageTable {
         let virt = self.frame.as_hhdm_virt();
         assert!(virt.is_aligned(Arch::PAGE_SIZE));
         unsafe { &*virt.as_raw_ptr() }
     }
 
-    pub unsafe fn as_raw_mut(&mut self) -> &mut [PageTableEntry; Arch::PAGE_ENTRIES] {
+    pub unsafe fn as_raw_mut(&mut self) -> &mut RawPageTable {
         let virt = self.frame.as_hhdm_virt();
         assert!(virt.is_aligned(Arch::PAGE_SIZE));
         unsafe { &mut *virt.as_raw_ptr_mut() }
@@ -139,6 +170,7 @@ impl PageTable {
         Ok(PageTable {
             frame: entry.addr()?,
             level: next_level,
+            kind: self.kind,
         })
     }
 
@@ -159,6 +191,7 @@ impl PageTable {
         Ok(PageTable {
             frame: entry.addr()?,
             level: next_level,
+            kind: self.kind,
         })
     }
 
@@ -195,7 +228,7 @@ impl PageTable {
         flags: PageFlags,
     ) -> Result<PageFlushAll, MemError> {
         while size != 0 {
-            let block_size = BlockSize::pick(page, frame, size);
+            let block_size = BlockSize::largest_aligned(page, frame, size);
             let flush = self.map_to(page, frame, block_size, flags)?;
             unsafe { flush.ignore() };
 

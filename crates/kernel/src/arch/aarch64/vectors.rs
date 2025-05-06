@@ -324,6 +324,18 @@ macro_rules! exception_stack {
     };
 }
 
+#[unsafe(naked)]
+pub unsafe extern "C" fn enter_usermode() -> ! {
+    core::arch::naked_asm!(concat!(
+        "blr x28\n",
+        // Restore all userspace registers
+        pop_special!(),
+        pop_scratch!(),
+        pop_preserved!(),
+        "eret\n",
+    ));
+}
+
 pub fn exception_code(esr: usize) -> u8 {
     ((esr >> 26) & 0x3f) as u8
 }
@@ -364,7 +376,6 @@ exception_stack!(__sync_current_el_spx, |stack| {
             _ => unhandled_fault(faulted_addr, wn_r, dfsc),
         }
     }
-    log::error!("-----------------");
     stack.dump();
     panic!("{}", stringify!(__sync_current_el_spx))
 });
@@ -381,6 +392,14 @@ exception_stack!(__serr_current_el_spx, |stack| {
     panic!("{}", stringify!(__serr_current_el_spx))
 });
 exception_stack!(__sync_lower_el_a64, |stack| {
+    match exception_code(stack.iret.esr_el1) {
+        0b010101 => {
+            log::debug!("Syscall!");
+        }
+        code => {
+            log::error!("{:#b}", code);
+        }
+    }
     stack.dump();
     panic!("{}", stringify!(__sync_lower_el_a64))
 });

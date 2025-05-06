@@ -61,6 +61,10 @@ impl ArchTrait for X86_64 {
         idt::init();
     }
 
+    unsafe fn init_syscalls() {
+        todo!("x86_64 init_syscalls")
+    }
+
     unsafe fn enable_interrupts() {
         interrupts::enable();
     }
@@ -133,8 +137,9 @@ impl ArchTrait for X86_64 {
         x
     }
 
-    fn exit_qemu(_code: u32) -> ! {
-        Self::hcf() // todo
+    fn exit_qemu(code: u32) -> ! {
+        use qemu_exit::QEMUExit;
+        qemu_exit::X86::new(0xf4, 0x3).exit(code)
     }
 
     fn hcf() -> ! {

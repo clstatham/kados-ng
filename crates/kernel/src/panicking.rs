@@ -9,7 +9,10 @@ use xmas_elf::{
 use crate::{
     KERNEL_ELF,
     arch::{Arch, ArchTrait},
-    mem::{paging::table::PageTable, units::VirtAddr},
+    mem::{
+        paging::table::{PageTable, TableKind},
+        units::VirtAddr,
+    },
     println,
 };
 
@@ -78,7 +81,7 @@ pub fn unwind_kernel_stack() -> Result<(), UnwindStackError> {
         return Ok(());
     }
 
-    let mapper = PageTable::current();
+    let mapper = PageTable::current(TableKind::Kernel);
 
     println!("---BEGIN BACKTRACE---");
     for depth in 0..64 {

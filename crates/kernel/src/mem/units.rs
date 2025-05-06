@@ -203,7 +203,7 @@ impl VirtAddr {
         Ok(buf.len())
     }
 
-    pub unsafe fn write<T: Copy + 'static>(self, val: T) -> Result<(), MemError> {
+    pub unsafe fn write<T: 'static>(self, val: T) -> Result<(), MemError> {
         self.align_ok::<T>()?;
         unsafe {
             self.as_raw_ptr_mut::<T>().write(val);
@@ -211,7 +211,7 @@ impl VirtAddr {
         Ok(())
     }
 
-    pub unsafe fn write_volatile<T: Copy + 'static>(self, val: T) -> Result<(), MemError> {
+    pub unsafe fn write_volatile<T: 'static>(self, val: T) -> Result<(), MemError> {
         self.align_ok::<T>()?;
         unsafe {
             self.as_raw_ptr_mut::<T>().write_volatile(val);

@@ -109,6 +109,10 @@ impl KernelFrameAllocator {
         unsafe { self.allocate(FrameCount::new(1)) }
     }
 
+    pub fn free(&mut self, start: PhysAddr, count: FrameCount) -> Result<(), MemError> {
+        kernel_frame_allocator().lock().free(start, count)
+    }
+
     pub fn usage(&self) -> Option<FrameCount> {
         kernel_frame_allocator().lock().usage()
     }

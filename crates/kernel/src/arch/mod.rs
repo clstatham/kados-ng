@@ -12,7 +12,10 @@ pub use self::x86_64::X86_64 as Arch;
 #[cfg(target_arch = "x86_64")]
 pub use self::x86_64::*;
 
-use crate::mem::units::{PhysAddr, VirtAddr};
+use crate::mem::{
+    paging::table::TableKind,
+    units::{PhysAddr, VirtAddr},
+};
 
 pub trait ArchTrait {
     const PAGE_SHIFT: usize;
@@ -51,6 +54,9 @@ pub trait ArchTrait {
     unsafe fn init_mem();
     unsafe fn init_post_heap();
     unsafe fn init_interrupts();
+    unsafe fn init_cpu_local_block();
+    unsafe fn init_syscalls();
+
     unsafe fn enable_interrupts();
     unsafe fn disable_interrupts();
     unsafe fn set_interrupts_enabled(enable: bool) {
@@ -67,8 +73,8 @@ pub trait ArchTrait {
     unsafe fn invalidate_page(addr: VirtAddr);
     unsafe fn invalidate_all();
 
-    unsafe fn current_page_table() -> PhysAddr;
-    unsafe fn set_current_page_table(addr: PhysAddr);
+    unsafe fn current_page_table(kind: TableKind) -> PhysAddr;
+    unsafe fn set_current_page_table(addr: PhysAddr, kind: TableKind);
 
     unsafe fn set_stack_pointer_post_mapping(sp: VirtAddr) -> !;
 
@@ -76,6 +82,9 @@ pub trait ArchTrait {
     fn stack_pointer() -> usize;
     fn frame_pointer() -> usize;
 
+    fn current_cpu_local_block() -> VirtAddr;
+
     fn exit_qemu(code: u32) -> !;
+    fn halt();
     fn hcf() -> !;
 }

@@ -5,7 +5,6 @@
     clippy::new_without_default,
     clippy::uninlined_format_args
 )]
-#![feature(sync_unsafe_cell)]
 
 use arch::{Arch, ArchTrait};
 use framebuffer::FramebufferInfo;
@@ -24,13 +23,17 @@ use mem::{
     units::{FrameCount, PhysAddr},
 };
 use spin::Once;
+use task::switch::SwitchResult;
 use xmas_elf::ElfFile;
 
 extern crate alloc;
 
 pub mod arch;
+pub mod cpu_local;
 pub mod logging;
 pub mod serial;
+pub mod syscall;
+pub mod task;
 #[macro_use]
 pub mod framebuffer;
 pub mod mem;
@@ -52,7 +55,7 @@ static KERNEL_ELF: Once<ElfFile<'static>> = Once::new();
 static FRAMEBUFFER_INFO: Once<FramebufferInfo> = Once::new();
 
 pub const KERNEL_OFFSET: usize = 0xffffffff80000000; // must match linker.ld
-pub const KERNEL_STACK_SIZE: usize = 0x200000;
+pub const KERNEL_STACK_SIZE: usize = 1024 * 1024 * 2;
 
 macro_rules! elf_offsets {
     ($($name:ident),* $(,)?) => {
@@ -195,6 +198,11 @@ pub extern "C" fn kernel_main_post_paging() -> ! {
         unsafe { core::slice::from_raw_parts(kernel_file_addr.as_raw_ptr(), kernel_file_size) };
     KERNEL_ELF.call_once(|| ElfFile::new(kernel_file_data).expect("Error parsing kernel ELF file"));
 
+    log::info!("Initializing per-cpu structure");
+    unsafe {
+        Arch::init_cpu_local_block();
+    }
+
     mem::heap::init_heap();
 
     log::info!("Initializing memory (post-heap)");
@@ -203,17 +211,36 @@ pub extern "C" fn kernel_main_post_paging() -> ! {
         Arch::init_post_heap();
     }
 
+    log::info!("Initializing framebuffer");
+    framebuffer::init(*FRAMEBUFFER_INFO.get().unwrap());
+
     log::info!("Initializing frame allocator (post-heap)");
     kernel_frame_allocator().lock().convert_post_heap().unwrap();
 
-    log::info!("Initializing framebuffer");
-    framebuffer::init(*FRAMEBUFFER_INFO.get().unwrap());
+    log::info!("Initializing first context");
+    task::context::init();
 
     log::info!("Kernel boot finished after {:?}", arch::time::uptime());
 
     log::info!("Welcome to KaDOS!");
 
-    Arch::hcf()
+    task::spawn(false, test).unwrap();
+
+    loop {
+        match task::switch::switch() {
+            SwitchResult::Switched => unsafe {
+                Arch::enable_interrupts();
+            },
+            SwitchResult::AllIdle => unsafe {
+                Arch::enable_interrupts();
+                Arch::halt();
+            },
+        }
+    }
+}
+
+extern "C" fn test() {
+    log::info!("HELLO!!!!");
 }
 
 #[macro_export]

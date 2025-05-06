@@ -1,12 +1,13 @@
 use allocator::KernelFrameAllocator;
 use limine::memory_map::EntryType;
 use spin::Once;
-use table::{BlockSize, PageFlags, PageTable};
+use table::{BlockSize, PageFlags, PageTable, TableKind};
 
 use crate::{
     __rodata_end, __rodata_start, __text_end, __text_start, KERNEL_OFFSET, KERNEL_STACK_SIZE,
     arch::{Arch, ArchTrait},
     mem::{
+        MemError,
         heap::{KERNEL_HEAP_SIZE, KERNEL_HEAP_START},
         units::VirtAddr,
     },
@@ -85,7 +86,7 @@ pub fn map_memory() -> ! {
     let mem_map = MEM_MAP_ENTRIES.get().unwrap();
 
     unsafe {
-        let mut mapper = PageTable::create();
+        let mut mapper = PageTable::create(TableKind::Kernel);
         log::debug!("Mapping free areas");
         for entry in mem_map
             .usable_entries()
@@ -130,17 +131,18 @@ pub fn map_memory() -> ! {
         let stack_size = FrameCount::from_bytes(KERNEL_STACK_SIZE);
         let stack_base = KernelFrameAllocator.allocate(stack_size).unwrap();
         let stack_base_virt = stack_base.as_hhdm_virt();
-        let flush = mapper
-            .kernel_map_range(
-                stack_base_virt,
-                stack_base,
-                KERNEL_STACK_SIZE,
-                PageFlags::new_for_data_segment(),
-            )
-            .ok();
-        if let Some(flush) = flush {
-            // mapping can fail on x86_64 since it's already mapped as a free area
-            flush.ignore();
+        let flush = mapper.kernel_map_range(
+            stack_base_virt,
+            stack_base,
+            KERNEL_STACK_SIZE,
+            PageFlags::new_for_data_segment(),
+        );
+        match flush {
+            Ok(flush) => flush.ignore(),
+            Err(MemError::PageAlreadyMapped(_)) => {} // on x86_64, we map it as a "free area" above
+            e => {
+                e.unwrap();
+            }
         }
         let stack_top =
             (stack_base.add(stack_size.to_bytes())).value() + VirtAddr::MIN_HIGH.value();

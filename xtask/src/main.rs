@@ -592,6 +592,8 @@ impl Context {
             "2G",
             "-serial",
             "stdio",
+            "-device",
+            "isa-debug-exit,iobase=0xf4,iosize=0x04",
             "-cdrom",
             &qemu_cdrom_arg,
         ];

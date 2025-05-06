@@ -1,13 +1,21 @@
-use core::{arch::asm, marker::PhantomData, ops::Deref};
+use core::arch::asm;
 
 use aarch64_cpu::registers::*;
 
-use crate::mem::units::{PhysAddr, VirtAddr};
+use crate::{
+    cpu_local::CpuLocalBlock,
+    mem::{
+        paging::{allocator::KernelFrameAllocator, table::TableKind},
+        units::{PhysAddr, VirtAddr},
+    },
+};
 
 use super::ArchTrait;
 
 pub mod random;
 pub mod serial;
+pub mod syscall;
+pub mod task;
 pub mod time;
 pub mod vectors;
 
@@ -65,15 +73,20 @@ impl ArchTrait for AArch64 {
         }
     }
 
+    unsafe fn init_cpu_local_block() {
+        unsafe {
+            let frame = KernelFrameAllocator.allocate_one().unwrap();
+            let virt = frame.as_hhdm_virt().as_raw_ptr_mut::<CpuLocalBlock>();
+            virt.write(CpuLocalBlock::init());
+            TPIDR_EL1.set(virt as u64);
+        }
+    }
+
+    unsafe fn init_syscalls() {}
+
     #[inline(always)]
     unsafe fn enable_interrupts() {
-        unsafe {
-            asm!(
-                "
-                msr daifclr, #0b1111
-                "
-            )
-        }
+        unsafe { asm!("msr daifclr, #0b1111") }
     }
 
     #[inline(always)]
@@ -108,19 +121,25 @@ impl ArchTrait for AArch64 {
     }
 
     #[inline(always)]
-    unsafe fn current_page_table() -> PhysAddr {
+    unsafe fn current_page_table(kind: TableKind) -> PhysAddr {
         let addr: usize;
         unsafe {
-            asm!("mrs {}, ttbr1_el1", out(reg) addr);
+            match kind {
+                TableKind::Kernel => asm!("mrs {}, ttbr1_el1", out(reg) addr),
+                TableKind::User => asm!("mrs {}, ttbr0_el1", out(reg) addr),
+            }
         }
         PhysAddr::new_canonical(addr)
     }
 
     #[inline(always)]
-    unsafe fn set_current_page_table(addr: PhysAddr) {
+    unsafe fn set_current_page_table(addr: PhysAddr, kind: TableKind) {
         unsafe {
             asm!("dsb ishst");
-            asm!("msr ttbr1_el1, {}", in(reg) addr.value());
+            match kind {
+                TableKind::Kernel => asm!("msr ttbr1_el1, {}", in(reg) addr.value()),
+                TableKind::User => asm!("msr ttbr0_el1, {}", in(reg) addr.value()),
+            }
             asm!("dsb ish");
             asm!("isb");
         }
@@ -167,9 +186,18 @@ impl ArchTrait for AArch64 {
         fp
     }
 
+    fn current_cpu_local_block() -> VirtAddr {
+        VirtAddr::new_canonical(TPIDR_EL1.get() as usize)
+    }
+
     fn exit_qemu(code: u32) -> ! {
         use qemu_exit::QEMUExit;
         qemu_exit::AArch64::new().exit(code)
+    }
+
+    #[inline(always)]
+    fn halt() {
+        unsafe { asm!("wfe") }
     }
 
     fn hcf() -> ! {
@@ -179,28 +207,5 @@ impl ArchTrait for AArch64 {
                 asm!("nop");
             }
         }
-    }
-}
-
-#[repr(transparent)]
-pub struct MmioDeref<T> {
-    start_addr: usize,
-    _marker: PhantomData<fn() -> T>,
-}
-
-impl<T> MmioDeref<T> {
-    pub const unsafe fn new(start_addr: usize) -> Self {
-        Self {
-            start_addr,
-            _marker: PhantomData,
-        }
-    }
-}
-
-impl<T> Deref for MmioDeref<T> {
-    type Target = T;
-
-    fn deref(&self) -> &Self::Target {
-        unsafe { &*(self.start_addr as *const T) }
     }
 }
