@@ -11,7 +11,6 @@ use crate::{
         heap::{KERNEL_HEAP_SIZE, KERNEL_HEAP_START},
         units::VirtAddr,
     },
-    println,
 };
 
 use super::units::{FrameCount, PhysAddr};

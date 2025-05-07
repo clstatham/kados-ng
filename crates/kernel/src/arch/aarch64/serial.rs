@@ -5,8 +5,6 @@ use core::{
     ops::Deref,
 };
 
-use aarch64_cpu::asm::nop;
-
 use crate::{println, sync::IrqMutex};
 
 /* -------- base addresses ------------------------------------------------ */

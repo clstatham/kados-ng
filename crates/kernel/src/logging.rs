@@ -5,7 +5,6 @@ use embedded_graphics::prelude::{RgbColor, WebColors};
 
 use crate::{
     framebuffer::{Color, FRAMEBUFFER, render_text_buf},
-    println,
     task::context,
 };
 

@@ -1,7 +1,7 @@
 use core::arch::asm;
 
 use aarch64_cpu::registers::*;
-use serial::{PERIPHERAL_BASE, UART0_BASE};
+use serial::PERIPHERAL_BASE;
 
 use crate::{
     cpu_local::CpuLocalBlock,
@@ -12,7 +12,6 @@ use crate::{
         },
         units::{PhysAddr, VirtAddr},
     },
-    println,
 };
 
 use super::ArchTrait;
@@ -91,7 +90,7 @@ impl ArchTrait for AArch64 {
                 .kernel_map_range(
                     page,
                     frame,
-                    2 * 1024 * 1024,
+                    PERIPHERAL_SIZE,
                     PageFlags::from_raw(Self::PAGE_FLAG_DEVICE),
                 )
                 .unwrap()
