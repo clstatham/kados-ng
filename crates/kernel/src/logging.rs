@@ -5,6 +5,7 @@ use embedded_graphics::prelude::{RgbColor, WebColors};
 
 use crate::{
     framebuffer::{Color, FRAMEBUFFER, render_text_buf},
+    println,
     task::context,
 };
 
@@ -91,5 +92,5 @@ impl log::Log for Logger {
 pub fn init() {
     log::set_logger(&Logger).unwrap();
     log::set_max_level(log::LevelFilter::Trace);
-    log::info!("Logger initialized");
+    // println!("Logger initialized");
 }

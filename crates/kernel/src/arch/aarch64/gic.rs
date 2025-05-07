@@ -32,13 +32,13 @@ unsafe fn gicc_read(off: usize) -> u32 {
     unsafe { GICC_BASE.byte_add(off).read_volatile() }
 }
 
-pub fn irq_num() -> u32 {
+pub fn irq_ack() -> u32 {
     unsafe { gicc_read(0x00c) }
 }
 
 pub fn eoi(irq: u32) {
     unsafe {
-        gicc_write(0x0010, irq);
+        gicc_write(0x010, irq);
     }
 }
 

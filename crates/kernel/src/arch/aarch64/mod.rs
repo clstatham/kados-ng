@@ -1,14 +1,18 @@
 use core::arch::asm;
 
 use aarch64_cpu::registers::*;
-use limine::request::DeviceTreeBlobRequest;
+use serial::{PERIPHERAL_BASE, UART0_BASE};
 
 use crate::{
     cpu_local::CpuLocalBlock,
     mem::{
-        paging::{allocator::KernelFrameAllocator, table::TableKind},
+        paging::{
+            allocator::KernelFrameAllocator,
+            table::{PageFlags, PageTable, TableKind},
+        },
         units::{PhysAddr, VirtAddr},
     },
+    println,
 };
 
 use super::ArchTrait;
@@ -26,6 +30,15 @@ pub struct AArch64;
 impl AArch64 {
     pub const PAGE_FLAG_TYPE: usize = 1 << 1;
     pub const PAGE_FLAG_ACCESS: usize = 1 << 10;
+    pub const PAGE_FLAG_NORMAL: usize = 1 << 2;
+    pub const PAGE_FLAG_DEVICE: usize = //
+        Self::PAGE_FLAG_PRESENT         // Present
+            | Self::PAGE_FLAG_TYPE      // ?
+            | Self::PAGE_FLAG_ACCESS    // Access
+            | (0 << 2)                  // AttrIdx (0, nGnRE)
+            | (0 << 6)                  // AP (RW, priv)
+            | (0b10 << 8)               // SH (outer shareable)
+            | Self::PAGE_FLAG_NON_EXECUTABLE;
 }
 
 impl ArchTrait for AArch64 {
@@ -37,8 +50,11 @@ impl ArchTrait for AArch64 {
 
     const PAGE_ENTRY_ADDR_WIDTH: usize = 40;
 
-    const PAGE_FLAG_PAGE_DEFAULTS: usize =
-        Self::PAGE_FLAG_PRESENT | Self::PAGE_FLAG_TYPE | Self::PAGE_FLAG_ACCESS;
+    const PAGE_FLAG_PAGE_DEFAULTS: usize = Self::PAGE_FLAG_PRESENT
+        | Self::PAGE_FLAG_TYPE
+        | Self::PAGE_FLAG_ACCESS
+        | Self::PAGE_FLAG_NORMAL
+        | (0b11 << 8);
 
     const PAGE_FLAG_TABLE_DEFAULTS: usize =
         Self::PAGE_FLAG_PRESENT | Self::PAGE_FLAG_READWRITE | Self::PAGE_FLAG_TYPE;
@@ -61,10 +77,40 @@ impl ArchTrait for AArch64 {
 
     const PAGE_FLAG_HUGE: usize = 0;
 
+    #[inline(always)]
     unsafe fn init_pre_kernel_main() {}
 
-    unsafe fn init_mem() {
-        MAIR_EL1.set((0x44 << 8) | 0xff); // NORMAL_UNCACHED_MEMORY, NORMAL_WRITEBACK_MEMORY
+    unsafe fn init_mem(mapper: &mut PageTable) {
+        let frame = PhysAddr::new_canonical(PERIPHERAL_BASE);
+        let page = VirtAddr::new_canonical(PERIPHERAL_BASE);
+
+        const PERIPHERAL_SIZE: usize = 2 * 1024 * 1024;
+
+        unsafe {
+            mapper
+                .kernel_map_range(
+                    page,
+                    frame,
+                    2 * 1024 * 1024,
+                    PageFlags::from_raw(Self::PAGE_FLAG_DEVICE),
+                )
+                .unwrap()
+                .ignore();
+        };
+
+        unsafe {
+            gic::init();
+        }
+
+        const MAIR: usize = 0b11111111_00000100;
+        unsafe {
+            asm!("msr mair_el1, {}",
+                "dsb sy",
+                "isb",
+                in(reg) MAIR,
+                options(nostack, preserves_flags)
+            );
+        }
     }
 
     unsafe fn init_post_heap() {}
@@ -73,7 +119,6 @@ impl ArchTrait for AArch64 {
     unsafe fn init_interrupts() {
         unsafe {
             vectors::init();
-            gic::init();
         }
     }
 
@@ -192,6 +237,15 @@ impl ArchTrait for AArch64 {
 
     fn current_cpu_local_block() -> VirtAddr {
         VirtAddr::new_canonical(TPIDR_EL1.get() as usize)
+    }
+
+    fn emergency_reset() -> ! {
+        unsafe {
+            asm!("hvc   #0",
+                 in("x0")  0x8400_0009_usize,
+                 options(noreturn),
+            )
+        }
     }
 
     fn exit_qemu(code: u32) -> ! {

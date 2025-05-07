@@ -3,11 +3,11 @@
 #![allow(
     clippy::missing_safety_doc,
     clippy::new_without_default,
-    clippy::uninlined_format_args
+    clippy::uninlined_format_args,
+    clippy::identity_op
 )]
 
 use arch::{Arch, ArchTrait};
-use cpu_local::CpuLocalBlock;
 use framebuffer::FramebufferInfo;
 use limine::{
     memory_map::EntryType,
@@ -24,10 +24,7 @@ use mem::{
     units::{FrameCount, PhysAddr},
 };
 use spin::Once;
-use task::{
-    context::{CONTEXTS, Context, ContextRef},
-    switch::SwitchResult,
-};
+use task::switch::SwitchResult;
 use xmas_elf::ElfFile;
 
 extern crate alloc;
@@ -99,15 +96,14 @@ pub extern "C" fn kernel_main() -> ! {
 
     let boot_time = BOOT_TIME.get_response().unwrap();
 
-    arch::serial::init();
-
     unsafe {
         arch::time::init(boot_time.timestamp());
     }
 
+    arch::serial::init();
     logging::init();
 
-    log::info!("HHDM offset: {:#016x}", hhdm.offset());
+    println!("HHDM offset: {:#016x}", hhdm.offset());
 
     let kernel_file = KERNEL_FILE.get_response().unwrap();
     let kernel_file = kernel_file.file();
@@ -124,7 +120,7 @@ pub extern "C" fn kernel_main() -> ! {
         bpp: fb0.bpp() as usize,
     });
 
-    log::info!("Kernel starting...");
+    println!("Kernel starting...");
 
     let mem_map = MEM_MAP.get_response().unwrap();
     let mut total_free = 0;
@@ -142,7 +138,8 @@ pub extern "C" fn kernel_main() -> ! {
             EntryType::FRAMEBUFFER => "FRAMEBUFFER",
             _ => "UNKNOWN",
         };
-        log::info!(
+
+        println!(
             "{:#016x} .. {:#016x}  {}",
             entry.base,
             entry.base + entry.length,
@@ -175,13 +172,13 @@ pub extern "C" fn kernel_main() -> ! {
             _ => {}
         }
     }
-    log::info!("{total_free} bytes free");
+    println!("{total_free} bytes free");
     MEM_MAP_ENTRIES.call_once(|| mem_map_entries);
 
-    log::info!("Adding memory map to kernel frame allocator");
+    // log::info!("Adding memory map to kernel frame allocator");
     init_kernel_frame_allocator(MEM_MAP_ENTRIES.get().unwrap().usable_entries());
 
-    log::info!("Initializing memory");
+    println!("Initializing memory");
     mem::paging::map_memory()
 }
 
@@ -232,19 +229,22 @@ pub extern "C" fn kernel_main_post_paging() -> ! {
 
     loop {
         unsafe {
-            Arch::enable_interrupts();
-            Arch::halt();
+            match task::switch::switch() {
+                SwitchResult::Switched => {
+                    Arch::enable_interrupts();
+                }
+                SwitchResult::AllIdle => {
+                    Arch::enable_interrupts();
+                    Arch::halt();
+                }
+            }
         }
     }
 }
 
 extern "C" fn test() {
-    log::warn!("This should only run once!");
-
-    let cx = task::context::current().unwrap();
-    CONTEXTS.write().remove(&ContextRef(cx));
-    task::switch::switch();
-    unreachable!()
+    log::warn!("Hello from PID 1!");
+    task::context::exit_current();
 }
 
 #[macro_export]

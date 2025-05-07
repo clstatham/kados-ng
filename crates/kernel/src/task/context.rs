@@ -109,3 +109,15 @@ pub fn is_current(cx: &Arc<RwSpinlock<Context>>) -> bool {
             .with_context(|cur| cur.is_some_and(|cur| Arc::ptr_eq(cx, cur)))
     })
 }
+
+pub fn exit(cx: &Arc<RwSpinlock<Context>>) {
+    CONTEXTS.write().remove(&ContextRef(cx.clone()));
+    super::switch::switch();
+    unreachable!()
+}
+
+pub fn exit_current() {
+    if let Some(current) = current() {
+        exit(&current);
+    }
+}

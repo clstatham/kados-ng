@@ -13,7 +13,7 @@ pub use self::x86_64::X86_64 as Arch;
 pub use self::x86_64::*;
 
 use crate::mem::{
-    paging::table::TableKind,
+    paging::table::{PageTable, TableKind},
     units::{PhysAddr, VirtAddr},
 };
 
@@ -51,7 +51,7 @@ pub trait ArchTrait {
         !(Self::PAGE_ENTRY_ADDR_MASK << Self::PAGE_ENTRY_ADDR_SHIFT);
 
     unsafe fn init_pre_kernel_main();
-    unsafe fn init_mem();
+    unsafe fn init_mem(mapper: &mut PageTable);
     unsafe fn init_post_heap();
     unsafe fn init_interrupts();
     unsafe fn init_cpu_local_block();
@@ -84,6 +84,7 @@ pub trait ArchTrait {
 
     fn current_cpu_local_block() -> VirtAddr;
 
+    fn emergency_reset() -> !;
     fn exit_qemu(code: u32) -> !;
     fn halt();
     fn hcf() -> !;

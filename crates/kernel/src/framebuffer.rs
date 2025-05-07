@@ -12,6 +12,7 @@ pub use embedded_graphics::pixelcolor::Bgr888 as Color;
 
 use crate::{
     mem::units::VirtAddr,
+    println,
     sync::{IrqMutex, IrqMutexGuard},
 };
 
@@ -338,5 +339,5 @@ pub fn init(fb_tag: FramebufferInfo) {
     fb().clear_pixels();
     fb().clear_text();
 
-    log::info!("Framebuffer resolution: {width}x{height}");
+    println!("Framebuffer resolution: {width}x{height}");
 }

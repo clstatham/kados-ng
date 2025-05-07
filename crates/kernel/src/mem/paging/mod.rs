@@ -11,6 +11,7 @@ use crate::{
         heap::{KERNEL_HEAP_SIZE, KERNEL_HEAP_START},
         units::VirtAddr,
     },
+    println,
 };
 
 use super::units::{FrameCount, PhysAddr};
@@ -87,7 +88,7 @@ pub fn map_memory() -> ! {
 
     unsafe {
         let mut mapper = PageTable::create(TableKind::Kernel);
-        log::debug!("Mapping free areas");
+        // log::debug!("Mapping free areas");
         for entry in mem_map
             .usable_entries()
             .iter()
@@ -106,7 +107,7 @@ pub fn map_memory() -> ! {
             flush.ignore();
         }
 
-        log::debug!("Mapping kernel");
+        // log::debug!("Mapping kernel");
         let kernel_entry = mem_map.kernel_entry();
         let kernel_base = kernel_entry.base;
         let kernel_size = kernel_entry.size;
@@ -133,7 +134,7 @@ pub fn map_memory() -> ! {
             flush.ignore();
         }
 
-        log::debug!("Mapping new kernel stack");
+        // log::debug!("Mapping new kernel stack");
         let stack_size = FrameCount::from_bytes(KERNEL_STACK_SIZE);
         let stack_base = KernelFrameAllocator.allocate(stack_size).unwrap();
         let stack_base_virt = stack_base.as_hhdm_virt();
@@ -153,7 +154,7 @@ pub fn map_memory() -> ! {
         let stack_top =
             (stack_base.add(stack_size.to_bytes())).value() + VirtAddr::MIN_HIGH.value();
 
-        log::debug!("Mapping heap");
+        // log::debug!("Mapping heap");
         let frames = KernelFrameAllocator
             .allocate(FrameCount::from_bytes(KERNEL_HEAP_SIZE))
             .unwrap();
@@ -167,17 +168,17 @@ pub fn map_memory() -> ! {
             .unwrap();
         flush.ignore();
 
-        log::debug!("New page table: {:?}", mapper.phys_addr());
-        for i in 0..Arch::PAGE_ENTRIES {
-            let entry = mapper.entry(i);
-            if entry.flags().is_present() {
-                log::debug!("{}: {} [{:?}]", i, entry.addr().unwrap(), entry.flags());
-            }
-        }
+        // log::debug!("New page table: {:?}", mapper.phys_addr());
+        // for i in 0..Arch::PAGE_ENTRIES {
+        //     let entry = mapper.entry(i);
+        //     if entry.flags().is_present() {
+        //         println!("{}: {} [{:?}]", i, entry.addr().unwrap(), entry.flags());
+        //     }
+        // }
+
+        Arch::init_mem(&mut mapper);
 
         mapper.make_current();
-
-        Arch::init_mem();
 
         Arch::set_stack_pointer_post_mapping(VirtAddr::new_canonical(stack_top))
     }

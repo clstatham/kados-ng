@@ -21,7 +21,8 @@ fn prevent_double_panic() {
 
     if PANICKING.swap(true, Ordering::SeqCst) {
         // Already panicking, avoid infinite loop
-        Arch::exit_qemu(1);
+        // Arch::exit_qemu(1);
+        Arch::hcf()
     }
 }
 

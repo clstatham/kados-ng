@@ -327,12 +327,10 @@ impl Context {
         let qemu_drive_arg = format!("if=sd,format=raw,file={}", self.kernel_img_path().display());
 
         let uboot_kernel_arg = format!("{}", self.uboot_dir().join("u-boot.bin").display());
-        let uboot_dtb_arg = format!(
+        let dtb_arg = format!(
             "{}",
-            self.uboot_dir()
-                .join("arch")
-                .join("arm")
-                .join("dts")
+            self.rpi_firmware_dir()
+                .join("boot")
                 .join("bcm2711-rpi-4-b.dtb")
                 .display()
         );
@@ -349,7 +347,7 @@ impl Context {
             "-kernel",
             &uboot_kernel_arg,
             "-dtb",
-            &uboot_dtb_arg,
+            &dtb_arg,
             "-D",
             "target/log.txt",
             "-d",
@@ -358,6 +356,8 @@ impl Context {
             "2G",
             "-serial",
             "stdio",
+            // "-serial",
+            // "/dev/tty3",
             "-semihosting",
         ]);
 
@@ -366,6 +366,10 @@ impl Context {
             qemu_args.push("-S");
         }
 
+        // cmd!(self.sh, "sudo")
+        //     .arg("qemu-system-aarch64")
+        //     .args(qemu_args)
+        //     .run()?;
         cmd!(self.sh, "qemu-system-aarch64").args(qemu_args).run()?;
 
         Ok(())
@@ -384,6 +388,7 @@ impl Context {
         cmd!(self.sh, "mformat -i {kernel_img_path} ::").run()?;
         cmd!(self.sh, "mmd -i {kernel_img_path} ::/EFI").run()?;
         cmd!(self.sh, "mmd -i {kernel_img_path} ::/EFI/BOOT").run()?;
+        cmd!(self.sh, "mmd -i {kernel_img_path} ::/overlays").run()?;
 
         Ok(())
     }
@@ -492,6 +497,12 @@ impl Context {
         cmd!(
             self.sh,
             "mcopy -i {kernel_img_path} {firmware_dir}/boot/bcm2711-rpi-4-b.dtb ::/bcm2711-rpi-4-b.dtb"
+        )
+        .run()?;
+
+        cmd!(
+            self.sh,
+            "mcopy -i {kernel_img_path} {firmware_dir}/boot/overlays/disable-bt.dtbo ::/overlays/disable-bt.dtbo"
         )
         .run()?;
 

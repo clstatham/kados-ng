@@ -77,7 +77,7 @@ pub unsafe extern "C" fn switch_finish_hook() {
     }
 }
 
-pub unsafe fn switch_arch_hook() {
+pub unsafe extern "C" fn switch_arch_hook() {
     let block = CpuLocalBlock::current().unwrap();
 
     let current_addr_space = block.current_addr_space.borrow();
@@ -118,6 +118,7 @@ fn is_runnable(cx: &mut Context) -> bool {
 }
 
 pub fn switch() -> SwitchResult {
+    log::debug!("switch()");
     let block = CpuLocalBlock::current().unwrap();
 
     while SWITCH_LOCK
@@ -187,9 +188,11 @@ pub fn switch() -> SwitchResult {
             switch_to(prev_cx, next_cx);
         }
 
+        log::debug!("Switched");
         SwitchResult::Switched
     } else {
         SWITCH_LOCK.store(false, Ordering::SeqCst);
+        log::debug!("All Idle");
         SwitchResult::AllIdle
     }
 }

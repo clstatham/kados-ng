@@ -1,5 +1,6 @@
 arm_64bit=1
 enable_uart=1
+dtoverlay=disable-bt
 kernel=u-boot.bin
 framebuffer_width=640
 framebuffer_height=480
