@@ -6,8 +6,7 @@ resolver = "3"
 edition = "2024"
 
 [profile.release]
-debug = true
-lto = false
+opt-level = "z"
 panic = "abort"
 
 [profile.dev]

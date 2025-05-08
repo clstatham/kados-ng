@@ -214,6 +214,14 @@ impl Context {
 
         match self.target {
             Target::AArch64 => {
+                let kernel_elf_path = self.kernel_elf_path();
+                let kernel_bin_path = self.kernel_bin_path();
+                cmd!(
+                    self.sh,
+                    "llvm-objcopy -O binary {kernel_elf_path} {kernel_bin_path}"
+                )
+                .run()?;
+
                 self.create_new_image_rpi()?;
 
                 self.build_dependencies_rpi()?;
@@ -285,17 +293,57 @@ impl Context {
     pub fn flash_rpi(&self, device: &str) -> anyhow::Result<()> {
         self.full_build_kernel()?;
 
-        log::info!("Flashing SD card image to {device} (will sudo)");
-        let kernel_img_path = self.kernel_img_path();
+        log::info!("Copying to SD card device {device} (will sudo)");
+        let kernel_elf_path = self.kernel_elf_path();
+        let kernel_bin_path = self.kernel_bin_path();
+        let firmware_dir = self.rpi_firmware_dir();
+
+        cmd!(self.sh, "sudo umount {device}")
+            .ignore_status()
+            .run()?;
+
+        cmd!(self.sh, "sudo mkdir -p /mnt/rpi-sd").run()?;
+        cmd!(self.sh, "sudo mount {device} /mnt/rpi-sd").run()?;
+        cmd!(self.sh, "sudo rm -rf /mnt/rpi-sd/*").run()?;
+        cmd!(self.sh, "sudo mkdir -p /mnt/rpi-sd/overlays").run()?;
 
         cmd!(
             self.sh,
-            "sudo dd if={kernel_img_path} of={device} bs=4M status=progress"
+            "llvm-objcopy -O binary {kernel_elf_path} {kernel_bin_path}"
         )
         .run()?;
-        cmd!(self.sh, "sync").run()?;
 
-        log::info!("Flash complete!");
+        cmd!(self.sh, "sudo cp {kernel_bin_path} /mnt/rpi-sd/kernel8.img").run()?;
+        cmd!(self.sh, "sudo cp config.txt /mnt/rpi-sd/config.txt").run()?;
+        cmd!(
+            self.sh,
+            "sudo cp {firmware_dir}/boot/start4.elf /mnt/rpi-sd/start4.elf"
+        )
+        .run()?;
+        cmd!(
+            self.sh,
+            "sudo cp {firmware_dir}/boot/bootcode.bin /mnt/rpi-sd/bootcode.bin"
+        )
+        .run()?;
+        cmd!(
+            self.sh,
+            "sudo cp {firmware_dir}/boot/fixup4.dat /mnt/rpi-sd/fixup4.dat"
+        )
+        .run()?;
+        cmd!(
+            self.sh,
+            "sudo cp {firmware_dir}/boot/bcm2711-rpi-4-b.dtb /mnt/rpi-sd/bcm2711-rpi-4-b.dtb"
+        )
+        .run()?;
+        cmd!(
+            self.sh,
+            "sudo cp {firmware_dir}/boot/overlays/disable-bt.dtbo /mnt/rpi-sd/overlays/disable-bt.dtbo"
+        )
+        .run()?;
+
+        cmd!(self.sh, "sudo umount {device}").run()?;
+
+        log::info!("Copy complete!");
 
         Ok(())
     }
@@ -357,7 +405,7 @@ impl Context {
             std::fs::remove_file(&kernel_img_path)?;
         }
 
-        cmd!(self.sh, "truncate -s 128M {kernel_img_path}").run()?;
+        cmd!(self.sh, "truncate -s 4M {kernel_img_path}").run()?;
         cmd!(self.sh, "mformat -i {kernel_img_path} ::").run()?;
         cmd!(self.sh, "mmd -i {kernel_img_path} ::/overlays").run()?;
 
@@ -385,7 +433,7 @@ impl Context {
     }
 
     fn copy_files_to_image_rpi(&self) -> anyhow::Result<()> {
-        log::info!("Copying files to SD card image");
+        log::info!("Copying files to SD card");
 
         let kernel_elf_path = self.kernel_elf_path();
         let kernel_bin_path = self.kernel_bin_path();
@@ -400,13 +448,7 @@ impl Context {
 
         cmd!(
             self.sh,
-            "mcopy -i {kernel_img_path} {kernel_bin_path} ::/kados.bin"
-        )
-        .run()?;
-
-        cmd!(
-            self.sh,
-            "mcopy -i {kernel_img_path} {kernel_elf_path} ::/kados.elf"
+            "mcopy -i {kernel_img_path} {kernel_bin_path} ::/kernel8.img"
         )
         .run()?;
 
