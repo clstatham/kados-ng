@@ -2,11 +2,13 @@ use aarch64_cpu::registers::*;
 
 pub const GICD_BASE: *mut u32 = 0xFF84_1000 as *mut u32;
 pub const GICC_BASE: *mut u32 = 0xFF84_2000 as *mut u32;
-const TIMER_IRQ: u32 = 30;
+
+pub const TIMER_IRQ: u32 = 30;
 
 unsafe fn gicd_write(off: usize, val: u32) {
     unsafe {
         GICD_BASE.byte_add(off).write_volatile(val);
+        core::arch::asm!("dsb sy; isb");
     }
 }
 
@@ -25,6 +27,7 @@ unsafe fn gicd_set(off: usize, bit_shift: u8) {
 unsafe fn gicc_write(off: usize, val: u32) {
     unsafe {
         GICC_BASE.byte_add(off).write_volatile(val);
+        core::arch::asm!("dsb sy; isb");
     }
 }
 
@@ -59,8 +62,6 @@ pub unsafe fn init() {
         pri |= 0x80 << shift;
         gicd_write(reg, pri);
 
-        core::arch::asm!("dsb sy; isb");
-
         let cfg_reg = 0xC00 + 4;
         let mut cfg = gicd_read(cfg_reg);
         cfg &= !(0b11 << ((TIMER_IRQ - 16) * 2));
@@ -68,21 +69,14 @@ pub unsafe fn init() {
 
         gicd_set(0x100, TIMER_IRQ as u8);
 
-        core::arch::asm!("dsb sy; isb");
-
         gicd_write(0x000, 0b11);
-
-        core::arch::asm!("isb");
 
         // GICC
 
         gicc_write(0x000, 0); // disable
-        core::arch::asm!("dsb sy; isb");
         gicc_write(0x004, 0xff); // prio mask
         gicc_write(0x008, 0); // binary point 0
-        core::arch::asm!("dsb sy; isb");
-        gicc_write(0x000, 1 << 1); // enable group 1
-        core::arch::asm!("dsb sy; isb");
+        gicc_write(0x000, (1 << 1) | (1 << 2)); // enable group 1, AckCtl
 
         // timer
 

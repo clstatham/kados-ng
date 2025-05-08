@@ -76,8 +76,6 @@ pub trait ArchTrait {
     unsafe fn current_page_table(kind: TableKind) -> PhysAddr;
     unsafe fn set_current_page_table(addr: PhysAddr, kind: TableKind);
 
-    unsafe fn set_stack_pointer_post_mapping(sp: VirtAddr) -> !;
-
     fn instruction_pointer() -> usize;
     fn stack_pointer() -> usize;
     fn frame_pointer() -> usize;

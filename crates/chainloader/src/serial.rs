@@ -124,6 +124,21 @@ impl GpioUart {
             DR.write_volatile(c as u32);
         }
     }
+
+    #[inline]
+    pub fn getchar() -> u8 {
+        unsafe {
+            loop {
+                let fr = FR.read_volatile();
+                if fr & (1 << 4) != 0 {
+                    // nop();
+                } else {
+                    break;
+                }
+            }
+            DR.read_volatile() as u8
+        }
+    }
 }
 
 impl Write for GpioUart {

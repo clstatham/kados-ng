@@ -16,6 +16,7 @@ use crate::{
 
 use super::ArchTrait;
 
+pub mod boot;
 pub mod gic;
 pub mod random;
 pub mod serial;
@@ -30,13 +31,16 @@ impl AArch64 {
     pub const PAGE_FLAG_TYPE: usize = 1 << 1;
     pub const PAGE_FLAG_ACCESS: usize = 1 << 10;
     pub const PAGE_FLAG_NORMAL: usize = 1 << 2;
-    pub const PAGE_FLAG_DEVICE: usize = //
-        Self::PAGE_FLAG_PRESENT         // Present
-            | Self::PAGE_FLAG_TYPE      // ?
-            | Self::PAGE_FLAG_ACCESS    // Access
-            | (0 << 2)                  // AttrIdx (0, nGnRE)
-            | (0 << 6)                  // AP (RW, priv)
-            | (0b10 << 8)               // SH (outer shareable)
+    pub const PAGE_FLAG_INNER_SHAREABLE: usize = 0b11 << 8;
+    pub const PAGE_FLAG_OUTER_SHAREABLE: usize = 0b10 << 8;
+
+    pub const PAGE_FLAG_DEVICE: usize =
+        Self::PAGE_FLAG_PRESENT      
+            | Self::PAGE_FLAG_TYPE   
+            | Self::PAGE_FLAG_ACCESS 
+            | (0 << 2) // AttrIdx (0, nGnRE)
+            | (0 << 6) // AP (RW, priv)
+            | Self::PAGE_FLAG_OUTER_SHAREABLE
             | Self::PAGE_FLAG_NON_EXECUTABLE;
 }
 
@@ -53,7 +57,7 @@ impl ArchTrait for AArch64 {
         | Self::PAGE_FLAG_TYPE
         | Self::PAGE_FLAG_ACCESS
         | Self::PAGE_FLAG_NORMAL
-        | (0b11 << 8);
+        | Self::PAGE_FLAG_INNER_SHAREABLE;
 
     const PAGE_FLAG_TABLE_DEFAULTS: usize =
         Self::PAGE_FLAG_PRESENT | Self::PAGE_FLAG_READWRITE | Self::PAGE_FLAG_TYPE;
@@ -100,16 +104,6 @@ impl ArchTrait for AArch64 {
         unsafe {
             gic::init();
         }
-
-        const MAIR: usize = 0b11111111_00000100;
-        unsafe {
-            asm!("msr mair_el1, {}",
-                "dsb sy",
-                "isb",
-                in(reg) MAIR,
-                options(nostack, preserves_flags)
-            );
-        }
     }
 
     unsafe fn init_post_heap() {}
@@ -123,9 +117,14 @@ impl ArchTrait for AArch64 {
 
     unsafe fn init_cpu_local_block() {
         unsafe {
+            log::debug!("allocate_one");
             let frame = KernelFrameAllocator.allocate_one().unwrap();
             let virt = frame.as_hhdm_virt().as_raw_ptr_mut::<CpuLocalBlock>();
-            virt.write(CpuLocalBlock::init());
+            log::debug!("init");
+            let block = CpuLocalBlock::init();
+            log::debug!("write");
+            virt.write(block);
+            log::debug!("set");
             TPIDR_EL1.set(virt as u64);
         }
     }
@@ -188,24 +187,10 @@ impl ArchTrait for AArch64 {
                 TableKind::Kernel => asm!("msr ttbr1_el1, {}", in(reg) addr.value()),
                 TableKind::User => asm!("msr ttbr0_el1, {}", in(reg) addr.value()),
             }
-            asm!("dsb ish");
-            asm!("isb");
+            Self::invalidate_all();
         }
     }
 
-    #[inline(always)]
-    unsafe fn set_stack_pointer_post_mapping(sp: VirtAddr) -> ! {
-        unsafe {
-            core::arch::asm!(
-                "msr SPSel, #1",
-                "mov sp, {}",
-                "mov fp, xzr",
-                "b {}",
-                in(reg) sp.value(),
-                sym crate::kernel_main_post_paging, options(noreturn)
-            );
-        }
-    }
 
     #[inline(always)]
     fn instruction_pointer() -> usize {

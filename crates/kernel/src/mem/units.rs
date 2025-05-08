@@ -2,9 +2,12 @@ use core::fmt::{self, Debug, Display};
 
 use derive_more::*;
 
-use crate::arch::{Arch, ArchTrait};
+use crate::{
+    HHDM_PHYSICAL_OFFSET,
+    arch::{Arch, ArchTrait},
+};
 
-use super::{MemError, hhdm_physical_offset, paging::table::PageTableLevel};
+use super::{MemError, paging::table::PageTableLevel};
 
 #[inline]
 pub const fn canonicalize_physaddr(addr: usize) -> usize {
@@ -22,13 +25,13 @@ pub struct PhysAddr(usize);
 
 impl Debug for PhysAddr {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "PhysAddr({:#x})", self.0)
+        write!(f, "PhysAddr({:#016x})", self.0)
     }
 }
 
 impl Display for PhysAddr {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{:#x}", self.0)
+        write!(f, "{:#016x}", self.0)
     }
 }
 
@@ -76,7 +79,7 @@ impl PhysAddr {
     }
 
     pub fn as_hhdm_virt(self) -> VirtAddr {
-        VirtAddr::new_canonical(self.value() + hhdm_physical_offset())
+        VirtAddr::new_canonical(self.value() + HHDM_PHYSICAL_OFFSET)
     }
 
     pub fn frame_index(self) -> FrameCount {
@@ -98,19 +101,18 @@ pub struct VirtAddr(usize);
 
 impl Debug for VirtAddr {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "VirtAddr({:#x})", self.0)
+        write!(f, "VirtAddr({:#016x})", self.0)
     }
 }
 
 impl Display for VirtAddr {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{:#x}", self.0)
+        write!(f, "{:#016x}", self.0)
     }
 }
 
 impl VirtAddr {
     pub const NULL: Self = unsafe { Self::new_unchecked(0) };
-    pub const MIN_HIGH: Self = unsafe { Self::new_unchecked(0xFFFF_8000_0000_0000) };
 
     pub const fn new_canonical(addr: usize) -> Self {
         unsafe { Self::new_unchecked(canonicalize_virtaddr(addr)) }
@@ -174,7 +176,7 @@ impl VirtAddr {
     }
 
     pub fn as_hhdm_phys(self) -> PhysAddr {
-        PhysAddr::new_canonical(self.value() - hhdm_physical_offset())
+        PhysAddr::new_canonical(self.value() - HHDM_PHYSICAL_OFFSET)
     }
 
     pub const fn add(self, offset: usize) -> Self {

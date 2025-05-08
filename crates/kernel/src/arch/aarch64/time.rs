@@ -5,7 +5,6 @@ use core::{
 };
 
 use aarch64_cpu::{asm::barrier, registers::*};
-use spin::Once;
 
 const NANOSEC_PER_SEC: NonZeroUsize = NonZeroUsize::new(1_000_000_000).unwrap();
 
@@ -16,9 +15,7 @@ fn arch_timer_counter_frequency() -> NonZeroU32 {
     unsafe { core::ptr::read_volatile(&ARCH_TIMER_COUNTER_FREQUENCY) }
 }
 
-static BOOT_TIME: Once<Duration> = Once::new();
-
-pub unsafe fn init(boot_time: Duration) {
+pub unsafe fn init() {
     unsafe {
         core::arch::asm!(
             r#"
@@ -28,8 +25,6 @@ pub unsafe fn init(boot_time: Duration) {
             "#
         );
     }
-
-    BOOT_TIME.call_once(|| boot_time);
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]

@@ -23,6 +23,7 @@ impl PageFlush {
     }
 }
 
+#[must_use = "Page table changes must be flushed"]
 pub struct PageFlushAll;
 
 impl PageFlushAll {
@@ -33,14 +34,7 @@ impl PageFlushAll {
     }
 
     pub unsafe fn ignore(self) {
+        #[allow(clippy::forget_non_drop)]
         core::mem::forget(self);
-    }
-}
-
-impl Drop for PageFlushAll {
-    fn drop(&mut self) {
-        unsafe {
-            Arch::invalidate_all();
-        }
     }
 }

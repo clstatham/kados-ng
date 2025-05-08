@@ -1,16 +1,15 @@
 use allocator::KernelFrameAllocator;
-use limine::memory_map::EntryType;
-use spin::Once;
 use table::{BlockSize, PageFlags, PageTable, TableKind};
 
 use crate::{
-    __rodata_end, __rodata_start, __text_end, __text_start, KERNEL_OFFSET, KERNEL_STACK_SIZE,
+    __kernel_phys_end, __kernel_phys_start, __rodata_end, __rodata_start, __text_end, __text_start,
+    BOOT_INFO, KERNEL_OFFSET,
     arch::{Arch, ArchTrait},
     mem::{
-        MemError,
         heap::{KERNEL_HEAP_SIZE, KERNEL_HEAP_START},
         units::VirtAddr,
     },
+    println,
 };
 
 use super::units::{FrameCount, PhysAddr};
@@ -19,20 +18,16 @@ pub mod allocator;
 pub mod flush;
 pub mod table;
 
-pub static MEM_MAP_ENTRIES: Once<MemMapEntries<64>> = Once::new();
-
 #[derive(Clone, Copy)]
 pub struct MemMapEntry {
     pub base: PhysAddr,
     pub size: FrameCount,
-    pub kind: EntryType,
 }
 
 impl MemMapEntry {
     pub const EMPTY: Self = Self {
         base: PhysAddr::NULL,
         size: FrameCount::EMPTY,
-        kind: EntryType::BAD_MEMORY,
     };
 }
 
@@ -82,103 +77,109 @@ impl<const N: usize> MemMapEntries<N> {
     }
 }
 
-pub fn map_memory() -> ! {
-    let mem_map = MEM_MAP_ENTRIES.get().unwrap();
+pub fn map_memory() {
+    let mem_map = &BOOT_INFO.get().unwrap().mem_map;
 
-    unsafe {
-        let mut mapper = PageTable::create(TableKind::Kernel);
-        // log::debug!("Mapping free areas");
-        for entry in mem_map
-            .usable_entries()
-            .iter()
-            .chain(mem_map.identity_map_entries())
-        {
-            let phys = entry.base;
-            let virt = VirtAddr::new_canonical(phys.value() + VirtAddr::MIN_HIGH.value());
-            let flush = mapper
-                .kernel_map_range(
-                    virt,
-                    phys,
-                    entry.size.to_bytes(),
-                    PageFlags::new_for_data_segment(),
-                )
-                .unwrap();
-            flush.ignore();
-        }
-
-        // log::debug!("Mapping kernel");
-        let kernel_entry = mem_map.kernel_entry();
-        let kernel_base = kernel_entry.base;
-        let kernel_size = kernel_entry.size;
-        for frame_idx in 0..kernel_size.frame_count() {
-            let phys = PhysAddr::new_canonical(kernel_base.value() + frame_idx * Arch::PAGE_SIZE);
-            let virt = VirtAddr::new_canonical(KERNEL_OFFSET + frame_idx * Arch::PAGE_SIZE);
-
-            let flags = if (__text_start()..__text_end()).contains(&virt.value()) {
-                PageFlags::new_for_text_segment()
-            } else if (__rodata_start()..__rodata_end()).contains(&virt.value()) {
-                PageFlags::new_for_rodata_segment()
-            } else {
-                PageFlags::new_for_data_segment()
-            };
-            let flush = mapper
-                .map_to(virt, phys, BlockSize::Page4KiB, flags)
-                .unwrap();
-            flush.ignore();
-
-            let virt = phys.as_hhdm_virt();
-            let flush = mapper
-                .map_to(virt, phys, BlockSize::Page4KiB, flags)
-                .unwrap();
-            flush.ignore();
-        }
-
-        // log::debug!("Mapping new kernel stack");
-        let stack_size = FrameCount::from_bytes(KERNEL_STACK_SIZE);
-        let stack_base = KernelFrameAllocator.allocate(stack_size).unwrap();
-        let stack_base_virt = stack_base.as_hhdm_virt();
-        let flush = mapper.kernel_map_range(
-            stack_base_virt,
-            stack_base,
-            KERNEL_STACK_SIZE,
-            PageFlags::new_for_data_segment(),
+    let mut mapper = PageTable::create(TableKind::Kernel);
+    println!("mapping free areas");
+    for entry in mem_map
+        .usable_entries()
+        .iter()
+        .chain(mem_map.identity_map_entries())
+    {
+        println!(
+            ">>> {} .. {}\t({} .. {})",
+            entry.base,
+            entry.base.add(entry.size.to_bytes()),
+            entry.base.as_hhdm_virt(),
+            entry.base.as_hhdm_virt().add(entry.size.to_bytes()),
         );
-        match flush {
-            Ok(flush) => flush.ignore(),
-            Err(MemError::PageAlreadyMapped(_)) => {} // on x86_64, we map it as a "free area" above
-            e => {
-                e.unwrap();
-            }
-        }
-        let stack_top =
-            (stack_base.add(stack_size.to_bytes())).value() + VirtAddr::MIN_HIGH.value();
-
-        // log::debug!("Mapping heap");
-        let frames = KernelFrameAllocator
-            .allocate(FrameCount::from_bytes(KERNEL_HEAP_SIZE))
-            .unwrap();
+        let phys = entry.base;
+        let virt = phys.as_hhdm_virt();
         let flush = mapper
             .kernel_map_range(
-                VirtAddr::new_unchecked(KERNEL_HEAP_START),
-                frames,
-                KERNEL_HEAP_SIZE,
+                virt,
+                phys,
+                entry.size.to_bytes(),
                 PageFlags::new_for_data_segment(),
             )
             .unwrap();
-        flush.ignore();
+        unsafe { flush.ignore() }
+    }
 
-        // log::debug!("New page table: {:?}", mapper.phys_addr());
-        // for i in 0..Arch::PAGE_ENTRIES {
-        //     let entry = mapper.entry(i);
-        //     if entry.flags().is_present() {
-        //         println!("{}: {} [{:?}]", i, entry.addr().unwrap(), entry.flags());
-        //     }
-        // }
+    println!("mapping kernel");
 
+    let kernel_base = __kernel_phys_start();
+    let kernel_size = __kernel_phys_end() - kernel_base;
+    let kernel_size = FrameCount::from_bytes(kernel_size);
+    println!(
+        ">>> {} .. {}\t({} .. {})",
+        PhysAddr::new_canonical(kernel_base),
+        PhysAddr::new_canonical(kernel_base + kernel_size.to_bytes()),
+        VirtAddr::new_canonical(kernel_base + KERNEL_OFFSET),
+        VirtAddr::new_canonical(kernel_base + KERNEL_OFFSET + kernel_size.to_bytes()),
+    );
+    for frame_idx in 0..kernel_size.frame_count() {
+        let phys = PhysAddr::new_canonical(kernel_base + frame_idx * Arch::PAGE_SIZE);
+        let virt = VirtAddr::new_canonical(KERNEL_OFFSET + frame_idx * Arch::PAGE_SIZE);
+
+        let flags = if (__text_start()..__text_end()).contains(&virt.value()) {
+            PageFlags::new_for_text_segment()
+        } else if (__rodata_start()..__rodata_end()).contains(&virt.value()) {
+            PageFlags::new_for_rodata_segment()
+        } else {
+            PageFlags::new_for_data_segment()
+        };
+        let flush = mapper
+            .map_to(virt, phys, BlockSize::Page4KiB, flags)
+            .unwrap();
+        unsafe { flush.ignore() }
+
+        let virt = phys.as_hhdm_virt();
+        let flush = mapper
+            .map_to(virt, phys, BlockSize::Page4KiB, flags)
+            .unwrap();
+        unsafe { flush.ignore() }
+    }
+
+    println!("mapping heap");
+    let frames = unsafe {
+        KernelFrameAllocator
+            .allocate(FrameCount::from_bytes(KERNEL_HEAP_SIZE))
+            .unwrap()
+    };
+    println!(
+        ">>> {} .. {}\t({} .. {})",
+        frames,
+        frames.add(KERNEL_HEAP_SIZE),
+        VirtAddr::new_canonical(KERNEL_HEAP_START),
+        VirtAddr::new_canonical(KERNEL_HEAP_START).add(KERNEL_HEAP_SIZE),
+    );
+    let flush = mapper
+        .kernel_map_range(
+            VirtAddr::new_canonical(KERNEL_HEAP_START),
+            frames,
+            KERNEL_HEAP_SIZE,
+            PageFlags::new_for_data_segment(),
+        )
+        .unwrap();
+    unsafe { flush.ignore() };
+
+    println!("New page table: {:?}", mapper.phys_addr());
+    for i in 0..Arch::PAGE_ENTRIES {
+        let entry = unsafe { mapper.entry(i) };
+        if entry.flags().is_present() {
+            println!("{}: {} [{:?}]", i, entry.addr().unwrap(), entry.flags());
+        }
+    }
+
+    unsafe {
+        println!("init_mem");
         Arch::init_mem(&mut mapper);
 
+        println!("make_current");
         mapper.make_current();
 
-        Arch::set_stack_pointer_post_mapping(VirtAddr::new_canonical(stack_top))
+        println!("to infinity and beyond...");
     }
 }

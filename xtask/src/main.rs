@@ -27,8 +27,6 @@ pub enum Mode {
         #[clap(short, long, default_value_t = false)]
         release: bool,
     },
-    /// Run Clippy with custom target options for the kernel
-    Clippy,
 }
 
 #[derive(Parser)]
@@ -47,22 +45,18 @@ pub struct Args {
 pub enum Target {
     #[clap(name = "aarch64")]
     AArch64,
-    #[clap(name = "x86_64")]
-    X86_64,
 }
 
 impl Target {
     pub fn target_dir(&self) -> &'static str {
         match self {
             Self::AArch64 => "aarch64-kados",
-            Self::X86_64 => "x86_64-kados",
         }
     }
 
     pub fn arch_dir(&self) -> PathBuf {
         match self {
             Self::AArch64 => PathBuf::from("arch").join("aarch64"),
-            Self::X86_64 => PathBuf::from("arch").join("x86_64"),
         }
     }
 }
@@ -148,48 +142,57 @@ impl Context {
         self.kernel_elf_path.clone()
     }
 
+    pub fn kernel_bin_path(&self) -> PathBuf {
+        self.kernel_elf_path().with_extension("bin")
+    }
+
     pub fn kernel_img_path(&self) -> PathBuf {
         self.kernel_elf_path().with_extension("img")
     }
 
-    pub fn linker_script_path(&self) -> PathBuf {
-        self.arch_dir().join("linker.ld")
+    pub fn linker_script_path(&self, module: &str) -> PathBuf {
+        self.build_root
+            .join("crates")
+            .join(module)
+            .join("src")
+            .join(self.target.arch_dir())
+            .join("linker.ld")
     }
 
-    pub fn uboot_dir(&self) -> PathBuf {
-        self.build_root.join("target").join("u-boot")
-    }
+    // pub fn uboot_dir(&self) -> PathBuf {
+    //     self.build_root.join("target").join("u-boot")
+    // }
 
-    pub fn limine_dir(&self) -> PathBuf {
-        self.build_root.join("target").join("limine")
-    }
+    // pub fn limine_dir(&self) -> PathBuf {
+    //     self.build_root.join("target").join("limine")
+    // }
 
     pub fn rpi_firmware_dir(&self) -> PathBuf {
         self.build_root.join("target").join("firmware")
     }
 
-    pub fn iso_root_dir(&self) -> PathBuf {
-        self.target_dir().join("iso_root")
-    }
+    // pub fn iso_root_dir(&self) -> PathBuf {
+    //     self.target_dir().join("iso_root")
+    // }
 
-    pub fn iso_path(&self) -> PathBuf {
-        self.target_dir().join("kernel.iso")
-    }
+    // pub fn iso_path(&self) -> PathBuf {
+    //     self.target_dir().join("kernel.iso")
+    // }
 
-    pub fn rustflags(&self) -> String {
+    pub fn rustflags(&self, module: &str) -> String {
         format!(
             "-C link-arg=-T{} -Cforce-frame-pointers=yes -C symbol-mangling-version=v0",
-            self.linker_script_path().display(),
+            self.linker_script_path(module).display(),
         )
     }
 
-    pub fn cargo_args(&self, mode: &str) -> Vec<String> {
+    pub fn cargo_args(&self, mode: &str, module: &str) -> Vec<String> {
         let mut cargo_args = args!(
             mode,
             "--target",
             &self.target_json_path().to_string_lossy(),
             "-p",
-            "kernel",
+            module,
             "-Zbuild-std=core,compiler_builtins,alloc",
             "-Zbuild-std-features=compiler-builtins-mem"
         );
@@ -201,27 +204,12 @@ impl Context {
         cargo_args
     }
 
-    pub fn run_clippy(&self) -> anyhow::Result<()> {
-        // log::info!("Running Clippy");
-
-        cmd!(self.sh, "cargo")
-            .args(self.cargo_args("clippy"))
-            .arg("--message-format")
-            .arg("json")
-            .env("RUSTFLAGS", self.rustflags())
-            .run()?;
-
-        // log::info!("Clippy complete!");
-
-        Ok(())
-    }
-
     pub fn full_build_kernel(&self) -> anyhow::Result<()> {
         log::info!("Building kernel with Cargo");
 
         cmd!(self.sh, "cargo")
-            .args(self.cargo_args("build"))
-            .env("RUSTFLAGS", self.rustflags())
+            .args(self.cargo_args("build", "kernel"))
+            .env("RUSTFLAGS", self.rustflags("kernel"))
             .run()?;
 
         match self.target {
@@ -231,10 +219,6 @@ impl Context {
                 self.build_dependencies_rpi()?;
 
                 self.copy_files_to_image_rpi()?;
-            }
-            Target::X86_64 => {
-                self.build_dependencies_pc()?;
-                self.create_iso_pc()?;
             }
         }
 
@@ -247,7 +231,7 @@ impl Context {
         log::info!("Building kernel tests with Cargo");
 
         let cargo_output = cmd!(self.sh, "cargo")
-            .args(self.cargo_args("test"))
+            .args(self.cargo_args("test", "kernel"))
             .arg("--no-run")
             .ignore_status()
             .output()?;
@@ -285,10 +269,6 @@ impl Context {
 
                 self.copy_files_to_image_rpi()?;
             }
-            Target::X86_64 => {
-                self.build_dependencies_pc()?;
-                self.create_iso_pc()?;
-            }
         }
 
         log::info!("Kernel tests build complete!");
@@ -299,7 +279,6 @@ impl Context {
     pub fn run_qemu(&self, debug_adapter: bool) -> anyhow::Result<()> {
         match self.target {
             Target::AArch64 => self.run_qemu_rpi(debug_adapter),
-            Target::X86_64 => self.run_qemu_pc(debug_adapter),
         }
     }
 
@@ -324,9 +303,9 @@ impl Context {
     pub fn run_qemu_rpi(&self, debug_adapter: bool) -> anyhow::Result<()> {
         log::info!("Running QEMU");
 
-        let qemu_drive_arg = format!("if=sd,format=raw,file={}", self.kernel_img_path().display());
+        let qemu_drive_arg = format!("file={},if=sd,format=raw", self.kernel_img_path().display());
 
-        let uboot_kernel_arg = format!("{}", self.uboot_dir().join("u-boot.bin").display());
+        let kernel_arg = format!("{}", self.kernel_bin_path().display());
         let dtb_arg = format!(
             "{}",
             self.rpi_firmware_dir()
@@ -345,7 +324,7 @@ impl Context {
             "-drive",
             &qemu_drive_arg,
             "-kernel",
-            &uboot_kernel_arg,
+            &kernel_arg,
             "-dtb",
             &dtb_arg,
             "-D",
@@ -356,8 +335,6 @@ impl Context {
             "2G",
             "-serial",
             "stdio",
-            // "-serial",
-            // "/dev/tty3",
             "-semihosting",
         ]);
 
@@ -366,10 +343,6 @@ impl Context {
             qemu_args.push("-S");
         }
 
-        // cmd!(self.sh, "sudo")
-        //     .arg("qemu-system-aarch64")
-        //     .args(qemu_args)
-        //     .run()?;
         cmd!(self.sh, "qemu-system-aarch64").args(qemu_args).run()?;
 
         Ok(())
@@ -386,43 +359,15 @@ impl Context {
 
         cmd!(self.sh, "truncate -s 128M {kernel_img_path}").run()?;
         cmd!(self.sh, "mformat -i {kernel_img_path} ::").run()?;
-        cmd!(self.sh, "mmd -i {kernel_img_path} ::/EFI").run()?;
-        cmd!(self.sh, "mmd -i {kernel_img_path} ::/EFI/BOOT").run()?;
         cmd!(self.sh, "mmd -i {kernel_img_path} ::/overlays").run()?;
 
         Ok(())
     }
 
     fn build_dependencies_rpi(&self) -> anyhow::Result<()> {
-        let limine_dir = self.limine_dir();
-        let uboot_dir = self.uboot_dir();
         let firmware_dir = self.rpi_firmware_dir();
 
         log::info!("Building dependencies");
-
-        if !limine_dir.exists() {
-            log::info!("Downloading Limine");
-            cmd!(
-                self.sh,
-                "git clone https://github.com/limine-bootloader/limine.git --depth=1 --branch v9.x-binary {limine_dir}"
-            )
-            .run()?;
-        } else {
-            let _guard = self.sh.push_dir(&limine_dir);
-            cmd!(self.sh, "git fetch").run()?;
-        }
-
-        if !uboot_dir.exists() {
-            log::info!("Downloading U-Boot");
-            cmd!(
-                self.sh,
-                "git clone https://github.com/u-boot/u-boot.git {uboot_dir}"
-            )
-            .run()?;
-        } else {
-            let _guard = self.sh.push_dir(&uboot_dir);
-            cmd!(self.sh, "git fetch").run()?;
-        }
 
         if !firmware_dir.exists() {
             log::info!("Downloading RPi Firmware");
@@ -436,14 +381,6 @@ impl Context {
             cmd!(self.sh, "git fetch").run()?;
         }
 
-        {
-            log::info!("Building U-Boot");
-            let _uboot = self.sh.push_dir(&uboot_dir);
-            cmd!(self.sh, "make rpi_4_defconfig").run()?;
-            let nproc = num_cpus::get().to_string();
-            cmd!(self.sh, "make -j{nproc} CROSS_COMPILE=aarch64-none-elf-").run()?;
-        }
-
         Ok(())
     }
 
@@ -451,30 +388,25 @@ impl Context {
         log::info!("Copying files to SD card image");
 
         let kernel_elf_path = self.kernel_elf_path();
+        let kernel_bin_path = self.kernel_bin_path();
         let kernel_img_path = self.kernel_img_path();
-        let limine_dir = self.limine_dir();
-        let uboot_dir = self.uboot_dir();
         let firmware_dir = self.rpi_firmware_dir();
 
         cmd!(
             self.sh,
-            "mcopy -i {kernel_img_path} {uboot_dir}/u-boot.bin ::/u-boot.bin"
+            "llvm-objcopy -O binary {kernel_elf_path} {kernel_bin_path}"
         )
         .run()?;
 
         cmd!(
             self.sh,
-            "mcopy -i {kernel_img_path} {limine_dir}/BOOTAA64.EFI ::/EFI/BOOT/BOOTAA64.EFI"
+            "mcopy -i {kernel_img_path} {kernel_bin_path} ::/kados.bin"
         )
         .run()?;
+
         cmd!(
             self.sh,
             "mcopy -i {kernel_img_path} {kernel_elf_path} ::/kados.elf"
-        )
-        .run()?;
-        cmd!(
-            self.sh,
-            "mcopy -i {kernel_img_path} limine.conf ::/limine.conf"
         )
         .run()?;
 
@@ -484,6 +416,11 @@ impl Context {
         )
         .run()?;
 
+        cmd!(
+            self.sh,
+            "mcopy -i {kernel_img_path} {firmware_dir}/boot/bootcode.bin ::/bootcode.bin"
+        )
+        .run()?;
         cmd!(
             self.sh,
             "mcopy -i {kernel_img_path} {firmware_dir}/boot/start4.elf ::/start4.elf"
@@ -505,116 +442,6 @@ impl Context {
             "mcopy -i {kernel_img_path} {firmware_dir}/boot/overlays/disable-bt.dtbo ::/overlays/disable-bt.dtbo"
         )
         .run()?;
-
-        Ok(())
-    }
-
-    fn build_dependencies_pc(&self) -> anyhow::Result<()> {
-        let limine_dir = self.limine_dir();
-
-        log::info!("Building dependencies");
-
-        if !limine_dir.exists() {
-            log::info!("Downloading Limine");
-            cmd!(
-                self.sh,
-                "git clone https://github.com/limine-bootloader/limine.git --depth=1 --branch v9.x-binary {limine_dir}"
-            )
-            .run()?;
-        } else {
-            let _guard = self.sh.push_dir(&limine_dir);
-            cmd!(self.sh, "git fetch").run()?;
-        }
-
-        {
-            let _dir = self.sh.push_dir(self.limine_dir());
-            cmd!(self.sh, "make").run()?;
-        }
-
-        Ok(())
-    }
-
-    fn create_iso_pc(&self) -> anyhow::Result<()> {
-        log::info!("Creating ISO image");
-
-        std::fs::create_dir_all(self.iso_root_dir())?;
-
-        cmd!(self.sh, "cp")
-            .arg(self.kernel_elf_path())
-            .arg("limine.conf")
-            .arg(self.limine_dir().join("limine-bios.sys"))
-            .arg(self.limine_dir().join("limine-bios-cd.bin"))
-            .arg(self.limine_dir().join("limine-uefi-cd.bin"))
-            .arg(self.iso_root_dir())
-            .run()?;
-
-        cmd!(self.sh, "mv")
-            .arg(
-                self.iso_root_dir()
-                    .join(self.kernel_elf_path.file_name().unwrap()),
-            )
-            .arg(self.iso_root_dir().join("kados.elf"))
-            .run()?;
-
-        cmd!(self.sh, "xorriso")
-            .arg("-as")
-            .arg("mkisofs")
-            .arg("-b")
-            .arg("limine-bios-cd.bin")
-            .arg("-no-emul-boot")
-            .arg("-boot-load-size")
-            .arg("4")
-            .arg("-boot-info-table")
-            .arg("--efi-boot")
-            .arg("limine-uefi-cd.bin")
-            .arg("-efi-boot-part")
-            .arg("--efi-boot-image")
-            .arg("--protective-msdos-label")
-            .arg(self.iso_root_dir())
-            .arg("-o")
-            .arg(self.iso_path())
-            .run()?;
-
-        let limine_deploy = self.limine_dir().join("limine");
-        cmd!(self.sh, "{limine_deploy}")
-            .arg("bios-install")
-            .arg(self.iso_path())
-            .run()?;
-
-        Ok(())
-    }
-
-    fn run_qemu_pc(&self, debug_adapter: bool) -> anyhow::Result<()> {
-        log::info!("Running QEMU");
-
-        let qemu_cdrom_arg = format!("{}", self.iso_path().display());
-        let mut qemu_args = vec![
-            "-M",
-            "q35",
-            "-cpu",
-            "EPYC",
-            "-D",
-            "target/log.txt",
-            "-d",
-            "int,guest_errors",
-            "-no-reboot",
-            "-no-shutdown",
-            "-m",
-            "2G",
-            "-serial",
-            "stdio",
-            "-device",
-            "isa-debug-exit,iobase=0xf4,iosize=0x04",
-            "-cdrom",
-            &qemu_cdrom_arg,
-        ];
-
-        if debug_adapter {
-            qemu_args.push("-s");
-            qemu_args.push("-S");
-        }
-
-        cmd!(self.sh, "qemu-system-x86_64").args(qemu_args).run()?;
 
         Ok(())
     }
@@ -644,10 +471,6 @@ fn main() -> anyhow::Result<()> {
         Mode::Flash { device, release } => {
             let cx = Context::new(args.target, release)?;
             cx.flash_rpi(device.as_str())?;
-        }
-        Mode::Clippy => {
-            let cx = Context::new(args.target, false)?;
-            cx.run_clippy()?;
         }
     }
 

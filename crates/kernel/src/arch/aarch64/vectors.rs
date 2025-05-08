@@ -359,13 +359,13 @@ exception_stack!(__serr_current_el_sp0, |stack| {
     panic!("{}", stringify!(__serr_current_el_sp0))
 });
 exception_stack!(__sync_current_el_spx, |stack| {
-    log::error!("SYNCHRONOUS EXCEPTION (current EL, SPX)");
+    println!("SYNCHRONOUS EXCEPTION (current EL, SPX)");
     let error_code = exception_code(stack.iret.esr_el1);
-    log::error!("Code: {error_code:#x}");
+    println!("Code: {error_code:#x}");
     if error_code == 0x25 {
-        log::error!("Translation Fault");
+        println!("Translation Fault");
         let faulted_addr = unsafe { VirtAddr::new_unchecked(FAR_EL1.get() as usize) };
-        log::error!("Faulted addr: {faulted_addr}");
+        println!("Faulted addr: {faulted_addr}");
 
         let iss = stack.iret.esr_el1 & 0x1ffffff;
         let wn_r = (iss >> 6) & 1 == 1;
@@ -436,28 +436,30 @@ exception_stack!(__serr_lower_el_a32, |stack| {
 });
 
 fn page_not_present(_faulted_addr: VirtAddr, caused_by_write: bool, _dfsc: usize) {
-    log::error!("Page not present (write = {caused_by_write})");
+    println!("Page not present (write = {caused_by_write})");
 }
 fn permission_fault(_faulted_addr: VirtAddr, caused_by_write: bool, _dfsc: usize) {
-    log::error!("Permission fault (write = {caused_by_write})");
+    println!("Permission fault (write = {caused_by_write})");
 }
 fn access_flag_fault(_faulted_addr: VirtAddr, caused_by_write: bool, _dfsc: usize) {
-    log::error!("Access flag fault (write = {caused_by_write})");
+    println!("Access flag fault (write = {caused_by_write})");
 }
 fn unhandled_fault(_faulted_addr: VirtAddr, caused_by_write: bool, dfsc: usize) {
-    log::error!("Unhandled fault (write = {caused_by_write})");
-    log::error!("dfsc: {dfsc:#b}");
+    println!("Unhandled fault (write = {caused_by_write})");
+    println!("dfsc: {dfsc:#b}");
 }
 
 fn handle_irq(irq: u32) {
-    println!("{irq}");
-    CNTP_TVAL_EL0.set(CNTFRQ_EL0.get() * 3 / 1_000_000);
-    switch();
-    // match irq {
-    //     30 => {}
-    //     1023 | 1022 => {
+    log::info!("{irq}");
 
-    //     }
-    //     _ => {}
-    // }
+    match irq {
+        30 => {
+            CNTP_TVAL_EL0.set(CNTFRQ_EL0.get() * 3 / 1_000_000);
+            switch();
+        }
+        1023 | 1022 => {
+            // spurious
+        }
+        _ => {}
+    }
 }

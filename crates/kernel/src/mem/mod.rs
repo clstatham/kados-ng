@@ -1,18 +1,10 @@
 use paging::table::PageTableEntry;
-use spin::Once;
 use thiserror::Error;
 use units::{PhysAddr, VirtAddr};
 
 pub mod heap;
 pub mod paging;
 pub mod units;
-
-pub static HHDM_PHYSICAL_OFFSET: Once<usize> = Once::new();
-
-#[inline(always)]
-pub fn hhdm_physical_offset() -> usize {
-    unsafe { *HHDM_PHYSICAL_OFFSET.get().unwrap_unchecked() }
-}
 
 #[derive(Debug, Error)]
 pub enum MemError {

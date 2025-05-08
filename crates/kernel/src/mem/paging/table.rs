@@ -83,6 +83,12 @@ pub struct RawPageTable {
     entries: [PageTableEntry; Arch::PAGE_ENTRIES],
 }
 
+impl RawPageTable {
+    pub const EMPTY: Self = Self {
+        entries: [PageTableEntry::UNUSED; Arch::PAGE_ENTRIES],
+    };
+}
+
 impl Index<usize> for RawPageTable {
     type Output = PageTableEntry;
 
@@ -112,6 +118,9 @@ pub struct PageTable {
 impl PageTable {
     pub fn create(kind: TableKind) -> PageTable {
         let frame = unsafe { KernelFrameAllocator.allocate_one().expect("Out of memory") };
+        unsafe {
+            frame.as_hhdm_virt().fill(0, Arch::PAGE_SIZE).unwrap();
+        }
         PageTable {
             frame,
             level: PageTableLevel::Level4,
@@ -183,6 +192,9 @@ impl PageTable {
         let entry = unsafe { self.entry_mut(index) };
         if entry.is_unused() {
             let frame = unsafe { KernelFrameAllocator.allocate_one()? };
+            unsafe {
+                frame.as_hhdm_virt().fill(0, Arch::PAGE_SIZE)?;
+            }
             *entry = PageTableEntry::new(frame, insert_flags);
         } else {
             entry.insert_flags(insert_flags);
