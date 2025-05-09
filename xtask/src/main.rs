@@ -405,7 +405,7 @@ impl Context {
             std::fs::remove_file(&kernel_img_path)?;
         }
 
-        cmd!(self.sh, "truncate -s 4M {kernel_img_path}").run()?;
+        cmd!(self.sh, "truncate -s 128M {kernel_img_path}").run()?;
         cmd!(self.sh, "mformat -i {kernel_img_path} ::").run()?;
         cmd!(self.sh, "mmd -i {kernel_img_path} ::/overlays").run()?;
 

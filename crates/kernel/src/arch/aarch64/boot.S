@@ -5,6 +5,8 @@ _start:
     ldr x1, =__boot_stack_top
     mov sp, x1
 
+    msr daifset, #0b1111
+
     mrs x1, SCTLR_EL2
     bic x1, x1, #1                // clear M bit
     msr SCTLR_EL2, x1

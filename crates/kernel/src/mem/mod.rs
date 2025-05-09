@@ -1,5 +1,6 @@
-use paging::table::PageTableEntry;
 use thiserror::Error;
+
+use paging::table::PageTableEntry;
 use units::{PhysAddr, VirtAddr};
 
 pub mod heap;
@@ -27,8 +28,8 @@ pub enum MemError {
     NoNextTable,
     #[error("Virtual address {0} is not a part of the page table at {1}")]
     NotPartOfTable(VirtAddr, PhysAddr),
-    #[error("Page already mapped: {0:?}")]
-    PageAlreadyMapped(PageTableEntry),
+    #[error("Page {0} is already mapped to {1:?}")]
+    PageAlreadyMapped(VirtAddr, PageTableEntry),
 
     #[error("Out of physical memory")]
     OutOfMemory,

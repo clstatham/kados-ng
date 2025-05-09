@@ -91,5 +91,5 @@ impl log::Log for Logger {
 pub fn init() {
     log::set_logger(&Logger).unwrap();
     log::set_max_level(log::LevelFilter::Trace);
-    // println!("Logger initialized");
+    log::info!("Logger initialized");
 }

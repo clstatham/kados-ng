@@ -43,20 +43,11 @@ pub unsafe extern "C" fn mmu_init_el2(dtb_ptr: *const u8, _zero: usize) -> ! {
 
         let mut off = &__boot_table as *const _ as usize;
 
-        // zero out page table memory
-        let mut i = 0;
-        while i < 1024 * 1024 {
-            *((off + i) as *mut u8) = 0;
-            i += 1;
-        }
-
-        asm!("dsb sy; isb");
-
         let l0 = alloc_table(&mut off);
 
         let flags = Arch::PAGE_FLAG_ACCESS
             | Arch::PAGE_FLAG_INNER_SHAREABLE
-            | Arch::PAGE_FLAG_TYPE
+            | Arch::PAGE_FLAG_NON_BLOCK
             | Arch::PAGE_FLAG_NORMAL
             | Arch::PAGE_FLAG_PRESENT;
 
@@ -104,120 +95,75 @@ pub unsafe extern "C" fn mmu_init_el2(dtb_ptr: *const u8, _zero: usize) -> ! {
         let stack_size = stack_top - stack_bottom;
         map_range(&mut off, l0, stack_bottom, stack_bottom, stack_size, flags);
 
-        asm!("dsb sy; isb");
-
-        // Disable MMU
-        asm!(
-            "mrs {0}, sctlr_el1",
-            "bic {0}, {0}, 1",
-            "msr sctlr_el1, {0}",
-            "isb",
-            out(reg) _,
-        );
-
-        // set MAIR
-        asm!(
-            "msr mair_el1, {0}",
-            in(reg) 0b11111111_00000100 as u64,
-        );
-
-        const TCR0: usize = (64 - 48) | (0b11 << 12) | (0b10 << 14);
-        const TCR1: usize = TCR0 | ((64 - 48) << 16) | (0b11 << 28) | (0b10 << 30);
-
-        // Set TCR
-        asm!(
-            "msr tcr_el1, {0}",
-            "isb",
-            in(reg) TCR1,
-        );
-
-        // Set page tables
-        asm!(
-            "dsb sy",
-            "msr ttbr1_el1, {0}",
-            "msr ttbr0_el1, {0}",
-            "isb",
-            "dsb ishst",
-            "tlbi vmalle1is",
-            "dsb ish",
-            "isb",
-            in(reg) l0,
-        );
-
-        // Enable MMU again
         const MCI: usize = (1 << 0) | (1 << 2) | (1 << 12);
+        const TCR0: usize =
+            ((64 - 48) << 0) | (0b01 << 8) | (0b01 << 10) | (0b11 << 12) | (0b00 << 14);
+        const TCR1: usize =
+            ((64 - 48) << 16) | (0b01 << 24) | (0b01 << 26) | (0b11 << 28) | (0b10 << 30);
+
         asm!(
-            "mrs {1}, sctlr_el1",
-            "orr {1}, {1}, {0}",
-            "msr sctlr_el1, {1}",
+            "mov x19, {dtb_ptr}",
+
+            // Disable MMU
+            "mrs    x0, sctlr_el1",
+            "bic    x0, x0, 1",
+            "msr    sctlr_el1, x0",
             "isb",
-            in(reg) MCI,
-            out(reg) _,
-        );
 
-        // Allow access to timers
-        asm!(
-            "mrs {0}, cnthctl_el2",
-            "orr {0}, {0}, #0x3",
-            "msr cnthctl_el2, {0}",
-            "msr cntvoff_el2, xzr",
-            out(reg) _
-        );
+            // Install EL1 page tables
+            "msr    mair_el1,   {mair}",
+            "msr    tcr_el1,    {tcr}",
+            "msr    ttbr0_el1,  {ttbr0}",
+            "msr    ttbr1_el1,  {ttbr1}",
 
-        // Initialize ID registers
-        asm!(
-            "mrs {0}, midr_el1",
-            "msr vpidr_el2, {0}",
-            "mrs {0}, mpidr_el1",
-            "msr vmpidr_el2, {0}",
-            out(reg) _
-        );
+            // Clear TLB
+            "dsb    ishst",
+            "tlbi   vmalle1",
+            "dsb    ish",
+            "isb",
 
-        // Disable traps
-        asm!(
-            "msr cptr_el2, {0}",
-            "msr hstr_el2, xzr",
-            in(reg) 0x33FF as u64
-        );
+            // Zero the EL2 -> EL1 timer offset
+            "msr    cntvoff_el2, xzr",
+            "isb",
 
-        // Enable floating point
-        asm!(
-            "msr cpacr_el1, {0}",
-            in(reg) (3 << 20) as u64
-        );
+            // Configure HCR_EL2: un-trap IRQ/FIQ + EL1‑AArch64
+            "mrs    x0, hcr_el2",
+            "bic    x0, x0, {hcr_clear}",
+            "orr    x0, x0, {hcr_set}",
+            "msr    hcr_el2, x0",
+            "isb",
 
-        // Set EL1 stack and VBAR
-        asm!(
-            "ldr {0}, =__stack_top",
-            "msr sp_el1, {0}",
-            "ldr {0}, =__exception_vectors",
-            "msr vbar_el1, {0}",
-            out(reg) _
-        );
+            // Set up stack
+            "ldr    x0, =__stack_top",
+            "msr    sp_el1, x0",
+            "ldr    x0, =__exception_vectors",
+            "msr    vbar_el1, x0",
 
-        // Configure execution state of EL1 as aarch64 and disable hypervisor call
-        asm!(
-            "msr hcr_el2, {0}",
-            in(reg) ((1 << 31) | (1 << 29)) as u64,
-        );
+            // Enable MMU
+            "mrs    x0, sctlr_el1",
+            "orr    x0, x0, {mci}",
+            "msr    sctlr_el1, x0",
+            "isb",
 
-        // Set saved program status register
-        asm!(
-            "msr spsr_el2, {0}",
-            in(reg) 0x3C5 as u64
-        );
-
-        // Switch to EL1
-        asm!(
-            "adr {0}, 1f",
-            "msr elr_el2, {0}",
+            // Set up exception state & jump
+            "mov    x0, x19",
+            "msr    spsr_el2, {spsr}",
+            "msr    SPSel, #1",
+            "msr    elr_el2,  {entry}",
             "eret",
-            "1:",
-            out(reg) _
-        );
 
-        // Jump to kernel
-        boot_higher_half(dtb_ptr)
+            mair        = in(reg) 0b11111111_00000000u64,
+            tcr         = in(reg) (TCR0|TCR1) as u64,
+            ttbr0       = in(reg) l0,
+            ttbr1       = in(reg) l0,
+            hcr_clear   = in(reg) ((1 << 8) | (1 << 9)) as u64,
+            hcr_set     = in(reg) ((1 << 31) | (1 << 29)) as u64,
+            mci         = in(reg) MCI,
+            spsr        = in(reg) 0x3C5u64,
+            dtb_ptr     = in(reg) dtb_ptr,
+            entry       = in(reg) boot_higher_half,
+            options(noreturn)
+        );
     }
 }
 
@@ -235,7 +181,7 @@ extern "C" fn boot_higher_half(dtb_ptr: *const u8) -> ! {
         let is_boot = |p| (boot_phys_start..boot_phys_end).contains(&p);
 
         for region in fdt.memory().regions() {
-            let mut start = (region.starting_address as usize).max(Arch::PAGE_SIZE);
+            let mut start = (region.starting_address as usize).max(boot_phys_start);
             let end = start + region.size.unwrap_or(0);
             if start >= end {
                 continue;
@@ -243,7 +189,7 @@ extern "C" fn boot_higher_half(dtb_ptr: *const u8) -> ! {
             let mut page = start;
             while page < end {
                 if is_kernel(page) {
-                    // we've run into kernel code; end our current chunk and skip past the kernel
+                    // we've run into kernel code; end our current chunk and skip past it
                     if page > start {
                         mem_map.push_usable(MemMapEntry {
                             base: PhysAddr::new_canonical(start),
@@ -256,7 +202,7 @@ extern "C" fn boot_higher_half(dtb_ptr: *const u8) -> ! {
                     continue;
                 }
                 if is_boot(page) {
-                    // we've run into boot code; end our current chunk and skip past the boot
+                    // we've run into boot code; end our current chunk and skip past it
                     if page > start {
                         mem_map.push_usable(MemMapEntry {
                             base: PhysAddr::new_canonical(start),
@@ -293,6 +239,11 @@ extern "C" fn boot_higher_half(dtb_ptr: *const u8) -> ! {
 #[unsafe(link_section = ".boot")]
 pub fn alloc_table(off: &mut usize) -> &'static mut Table {
     let table = unsafe { &mut *(*off as *mut Table) };
+    let mut i = 0;
+    while i < 512 {
+        table.0[i] = 0;
+        i += 1;
+    }
     *off += size_of::<Table>();
     table
 }
@@ -346,7 +297,10 @@ pub fn next_table(
         set_entry(
             &mut table.0[index],
             entry_addr(new_table as *const _ as usize),
-            Arch::PAGE_FLAG_ACCESS | Arch::PAGE_FLAG_TYPE | Arch::PAGE_FLAG_PRESENT | insert_flags,
+            Arch::PAGE_FLAG_ACCESS
+                | Arch::PAGE_FLAG_NON_BLOCK
+                | Arch::PAGE_FLAG_PRESENT
+                | insert_flags,
         );
         new_table
     } else {
@@ -406,7 +360,7 @@ fn largest_aligned_block_size(phys: usize, virt: usize, size: usize) -> usize {
 
 #[unsafe(link_section = ".boot")]
 fn map_to_1gib(off: &mut usize, table: &mut Table, phys: usize, virt: usize, flags: usize) {
-    let flags = flags & !Arch::PAGE_FLAG_TYPE;
+    let flags = flags & !Arch::PAGE_FLAG_NON_BLOCK;
     let l1 = next_table(off, table, l0_index(virt), 0);
     let idx = l1_index(virt);
     set_entry(&mut l1.0[idx], phys, flags);
@@ -414,7 +368,7 @@ fn map_to_1gib(off: &mut usize, table: &mut Table, phys: usize, virt: usize, fla
 
 #[unsafe(link_section = ".boot")]
 fn map_to_2mib(off: &mut usize, table: &mut Table, phys: usize, virt: usize, flags: usize) {
-    let flags = flags & !Arch::PAGE_FLAG_TYPE;
+    let flags = flags & !Arch::PAGE_FLAG_NON_BLOCK;
     let l1 = next_table(off, table, l0_index(virt), 0);
     let l2 = next_table(off, l1, l1_index(virt), 0);
     let idx = l2_index(virt);
@@ -423,7 +377,7 @@ fn map_to_2mib(off: &mut usize, table: &mut Table, phys: usize, virt: usize, fla
 
 #[unsafe(link_section = ".boot")]
 fn map_to_4kib(off: &mut usize, table: &mut Table, phys: usize, virt: usize, flags: usize) {
-    let flags = flags | Arch::PAGE_FLAG_TYPE;
+    let flags = flags | Arch::PAGE_FLAG_NON_BLOCK;
     let l1 = next_table(off, table, l0_index(virt), 0);
     let l2 = next_table(off, l1, l1_index(virt), 0);
     let l3 = next_table(off, l2, l2_index(virt), 0);

@@ -78,11 +78,15 @@ impl PhysAddr {
         Self::new_canonical(self.value() + offset)
     }
 
-    pub fn as_hhdm_virt(self) -> VirtAddr {
+    pub const fn as_hhdm_virt(self) -> VirtAddr {
         VirtAddr::new_canonical(self.value() + HHDM_PHYSICAL_OFFSET)
     }
 
-    pub fn frame_index(self) -> FrameCount {
+    pub const fn as_identity_virt(self) -> VirtAddr {
+        VirtAddr::new_canonical(self.value())
+    }
+
+    pub const fn frame_index(self) -> FrameCount {
         FrameCount::from_bytes(self.value())
     }
 
@@ -112,6 +116,8 @@ impl Display for VirtAddr {
 }
 
 impl VirtAddr {
+    pub const MAX_LOW: Self = unsafe { Self::new_unchecked(0x0000_7000_0000_0000) };
+    pub const MIN_HIGH: Self = unsafe { Self::new_unchecked(0xffff_8000_0000_0000) };
     pub const NULL: Self = unsafe { Self::new_unchecked(0) };
 
     pub const fn new_canonical(addr: usize) -> Self {

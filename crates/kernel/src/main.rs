@@ -7,6 +7,7 @@
     clippy::identity_op,
     clippy::unnecessary_cast
 )]
+#![feature(if_let_guard, iter_next_chunk)]
 
 use arch::{Arch, ArchTrait};
 use fdt::Fdt;
@@ -86,7 +87,6 @@ pub(crate) fn kernel_main() -> ! {
     }
 
     arch::serial::init();
-    logging::init();
 
     println!(
         r#"
@@ -103,6 +103,8 @@ pub(crate) fn kernel_main() -> ! {
     "#
     );
 
+    logging::init();
+
     // let kernel_elf_physaddr = __boot_start();
     // let kernel_size = __kernel_phys_end() - __boot_start();
     // KERNEL_ELF_PHYSADDR.call_once(|| PhysAddr::new_canonical(kernel_elf_physaddr));
@@ -117,12 +119,14 @@ pub(crate) fn kernel_main() -> ! {
     //     bpp: fb0.bpp() as usize,
     // });
 
-    println!("Kernel starting...");
+    log::info!("kernel starting...");
 
     init_kernel_frame_allocator();
 
-    println!("Initializing memory");
-    mem::paging::map_memory();
+    log::info!("initializing memory...");
+    unsafe {
+        mem::paging::map_memory();
+    }
 
     // log::info!("Initializing kernel ELF file info");
     // let kernel_file_addr = KERNEL_ELF_PHYSADDR.get().unwrap().as_hhdm_virt();
@@ -131,38 +135,42 @@ pub(crate) fn kernel_main() -> ! {
     //     unsafe { core::slice::from_raw_parts(kernel_file_addr.as_raw_ptr(), kernel_file_size) };
     // KERNEL_ELF.call_once(|| ElfFile::new(kernel_file_data).expect("Error parsing kernel ELF file"));
 
-    log::info!("Initializing interrupts");
+    log::info!("initializing interrupts...");
 
     unsafe {
         Arch::init_interrupts();
     }
 
-    log::info!("Initializing heap");
-    mem::heap::init_heap();
-
-    log::info!("Initializing per-cpu structure");
+    log::info!("initializing heap...");
     unsafe {
-        Arch::init_cpu_local_block();
+        mem::heap::init_heap();
     }
 
-    log::info!("Running init hooks (post-heap)");
+    log::info!("running init hooks (post-heap)...");
     unsafe {
         Arch::init_post_heap();
+    }
+
+    log::info!("initializing per-cpu structure...");
+    unsafe {
+        Arch::init_cpu_local_block();
     }
 
     // log::info!("Initializing framebuffer");
     // framebuffer::init(*FRAMEBUFFER_INFO.get().unwrap());
 
-    log::info!("Initializing frame allocator (post-heap)");
+    log::info!("initializing frame allocator (post-heap)...");
     kernel_frame_allocator().lock().convert_post_heap().unwrap();
 
-    log::info!("Initializing first context");
+    log::info!("initializing task contexts...");
     task::context::init();
+
+    log::info!("spawning first task...");
 
     task::spawn(false, test).unwrap();
 
-    log::info!("Kernel boot finished after {:?}", arch::time::uptime());
-    log::info!("Welcome to KaDOS!");
+    log::info!("kernel boot finished after {:?}", arch::time::uptime());
+    log::info!("welcome to KaDOS!");
 
     unsafe {
         loop {
@@ -180,17 +188,21 @@ extern "C" fn test() {
 #[macro_export]
 macro_rules! print {
     ($($arg:tt)*) => ({
-        let _ = $crate::serial::_print(format_args!($($arg)*));
-        let _ = $crate::framebuffer::_fb_print(format_args!($($arg)*));
+        let _ = $crate::serial::write_fmt(format_args!($($arg)*));
+        let _ = $crate::framebuffer::write_fmt(format_args!($($arg)*));
     });
 }
 
 #[macro_export]
 macro_rules! println {
+    () => ({
+        let _ = $crate::serial::write_fmt(format_args!("\n"));
+        let _ = $crate::framebuffer::write_fmt(format_args!("\n"));
+    });
     ($($arg:tt)*) => ({
-        let _ = $crate::serial::_print(format_args!($($arg)*));
+        let _ = $crate::serial::write_fmt(format_args!($($arg)*));
+        let _ = $crate::serial::write_fmt(format_args!("\n"));
         let _ = $crate::framebuffer::write_fmt(format_args!($($arg)*));
-        $crate::serial::write_fmt(format_args!("\n"));
-        $crate::framebuffer::write_fmt(format_args!("\n"));
+        let _ = $crate::framebuffer::write_fmt(format_args!("\n"));
     });
 }

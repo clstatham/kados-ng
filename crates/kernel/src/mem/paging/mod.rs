@@ -9,7 +9,6 @@ use crate::{
         heap::{KERNEL_HEAP_SIZE, KERNEL_HEAP_START},
         units::VirtAddr,
     },
-    println,
 };
 
 use super::units::{FrameCount, PhysAddr};
@@ -77,18 +76,18 @@ impl<const N: usize> MemMapEntries<N> {
     }
 }
 
-pub fn map_memory() {
+pub unsafe fn map_memory() {
     let mem_map = &BOOT_INFO.get().unwrap().mem_map;
 
-    let mut mapper = PageTable::create(TableKind::Kernel);
-    println!("mapping free areas");
+    let mut table = PageTable::create(TableKind::Kernel);
+    log::debug!("mapping free areas");
     for entry in mem_map
         .usable_entries()
         .iter()
         .chain(mem_map.identity_map_entries())
     {
-        println!(
-            ">>> {} .. {}\t({} .. {})",
+        log::debug!(
+            ">>> {} .. {} => {} .. {}",
             entry.base,
             entry.base.add(entry.size.to_bytes()),
             entry.base.as_hhdm_virt(),
@@ -96,7 +95,7 @@ pub fn map_memory() {
         );
         let phys = entry.base;
         let virt = phys.as_hhdm_virt();
-        let flush = mapper
+        let flush = table
             .kernel_map_range(
                 virt,
                 phys,
@@ -107,13 +106,13 @@ pub fn map_memory() {
         unsafe { flush.ignore() }
     }
 
-    println!("mapping kernel");
+    log::debug!("mapping kernel");
 
     let kernel_base = __kernel_phys_start();
     let kernel_size = __kernel_phys_end() - kernel_base;
     let kernel_size = FrameCount::from_bytes(kernel_size);
-    println!(
-        ">>> {} .. {}\t({} .. {})",
+    log::debug!(
+        ">>> {} .. {} => {} .. {}",
         PhysAddr::new_canonical(kernel_base),
         PhysAddr::new_canonical(kernel_base + kernel_size.to_bytes()),
         VirtAddr::new_canonical(kernel_base + KERNEL_OFFSET),
@@ -130,32 +129,32 @@ pub fn map_memory() {
         } else {
             PageFlags::new_for_data_segment()
         };
-        let flush = mapper
+        let flush = table
             .map_to(virt, phys, BlockSize::Page4KiB, flags)
             .unwrap();
         unsafe { flush.ignore() }
 
         let virt = phys.as_hhdm_virt();
-        let flush = mapper
+        let flush = table
             .map_to(virt, phys, BlockSize::Page4KiB, flags)
             .unwrap();
         unsafe { flush.ignore() }
     }
 
-    println!("mapping heap");
+    log::debug!("mapping heap");
     let frames = unsafe {
         KernelFrameAllocator
             .allocate(FrameCount::from_bytes(KERNEL_HEAP_SIZE))
             .unwrap()
     };
-    println!(
-        ">>> {} .. {}\t({} .. {})",
+    log::debug!(
+        ">>> {} .. {} => {} .. {}",
         frames,
         frames.add(KERNEL_HEAP_SIZE),
         VirtAddr::new_canonical(KERNEL_HEAP_START),
         VirtAddr::new_canonical(KERNEL_HEAP_START).add(KERNEL_HEAP_SIZE),
     );
-    let flush = mapper
+    let flush = table
         .kernel_map_range(
             VirtAddr::new_canonical(KERNEL_HEAP_START),
             frames,
@@ -165,21 +164,12 @@ pub fn map_memory() {
         .unwrap();
     unsafe { flush.ignore() };
 
-    println!("New page table: {:?}", mapper.phys_addr());
-    for i in 0..Arch::PAGE_ENTRIES {
-        let entry = unsafe { mapper.entry(i) };
-        if entry.flags().is_present() {
-            println!("{}: {} [{:?}]", i, entry.addr().unwrap(), entry.flags());
-        }
-    }
-
     unsafe {
-        println!("init_mem");
-        Arch::init_mem(&mut mapper);
-
-        println!("make_current");
-        mapper.make_current();
-
-        println!("to infinity and beyond...");
+        Arch::init_mem(&mut table);
+        log::debug!("Making new page table current");
+        table.make_current();
     }
+
+    log::debug!("New page table: {:?}", table.phys_addr());
+    // table.dump();
 }

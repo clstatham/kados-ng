@@ -1,124 +1,74 @@
-use core::{
-    num::{NonZeroU32, NonZeroU128, NonZeroUsize},
-    ops::{Add, Div},
-    time::Duration,
-};
+use core::{ops::Div, time::Duration};
 
 use aarch64_cpu::{asm::barrier, registers::*};
+use spin::Mutex;
 
-const NANOSEC_PER_SEC: NonZeroUsize = NonZeroUsize::new(1_000_000_000).unwrap();
+use crate::task::switch::switch;
 
-#[unsafe(no_mangle)]
-static ARCH_TIMER_COUNTER_FREQUENCY: NonZeroU32 = NonZeroU32::MIN;
+pub static TIMER: Mutex<GenericTimer> = Mutex::new(GenericTimer {
+    clk_freq: 0,
+    reload_count: 0,
+});
 
-fn arch_timer_counter_frequency() -> NonZeroU32 {
-    unsafe { core::ptr::read_volatile(&ARCH_TIMER_COUNTER_FREQUENCY) }
-}
-
-pub unsafe fn init() {
-    unsafe {
-        core::arch::asm!(
-            r#"
-            ldr x1, =ARCH_TIMER_COUNTER_FREQUENCY
-            mrs x2, CNTFRQ_EL0
-            str w2, [x1]
-            "#
-        );
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]
-pub struct GenericTimerValue {
-    pub value: usize,
-}
-
-impl Add for GenericTimerValue {
-    type Output = Self;
-
-    fn add(self, other: Self) -> Self {
-        Self {
-            value: self.value.wrapping_add(other.value),
-        }
-    }
-}
-
-impl GenericTimerValue {
-    pub fn new(value: usize) -> Self {
-        Self { value }
-    }
-}
-
-impl From<GenericTimerValue> for Duration {
-    fn from(value: GenericTimerValue) -> Self {
-        if value.value == 0 {
-            Duration::ZERO
-        } else {
-            let frequency = arch_timer_counter_frequency().get() as usize;
-
-            let secs = value.value / frequency;
-            let sub_seconds = value.value % frequency;
-            let nanos =
-                unsafe { sub_seconds.unchecked_mul(NANOSEC_PER_SEC.get()) }.div(frequency) as u32;
-
-            Duration::new(secs as u64, nanos)
-        }
-    }
-}
-
-impl TryFrom<Duration> for GenericTimerValue {
-    type Error = &'static str;
-
-    fn try_from(value: Duration) -> Result<Self, Self::Error> {
-        if value < resolution() {
-            return Ok(Self::new(0));
-        }
-
-        if value > max_duration() {
-            return Err("Duration exceeds maximum timer value");
-        }
-
-        let frequency = u32::from(arch_timer_counter_frequency()) as u128;
-        let duration = value.as_nanos();
-
-        let counter_value = unsafe { duration.unchecked_mul(frequency) }
-            .div(NonZeroU128::new(NANOSEC_PER_SEC.get() as u128).unwrap());
-
-        Ok(GenericTimerValue::new(counter_value as usize))
-    }
-}
-
-fn max_duration() -> Duration {
-    Duration::from(GenericTimerValue::new(usize::MAX))
-}
-
-pub fn resolution() -> Duration {
-    Duration::from(GenericTimerValue::new(1))
-}
-
-#[inline(always)]
-fn read_cntpct() -> GenericTimerValue {
-    barrier::isb(barrier::SY);
-    let cnt = CNTPCT_EL0.get();
-
-    GenericTimerValue::new(cnt as usize)
+pub fn init() {
+    TIMER.lock().init();
 }
 
 pub fn uptime() -> Duration {
-    read_cntpct().into()
+    TIMER.lock().uptime()
 }
 
-pub fn spin_for(duration: Duration) {
-    let start = read_cntpct();
-    let delta = match duration.try_into() {
-        Ok(delta) => delta,
-        Err(e) => {
-            log::warn!("Failed to convert duration: {e}");
-            return;
-        }
-    };
-    let end = start + delta;
+#[derive(Default)]
+pub struct GenericTimer {
+    pub clk_freq: u32,
+    pub reload_count: u32,
+}
 
-    while GenericTimerValue::new(CNTPCT_EL0.get() as usize) < end {
+impl GenericTimer {
+    pub fn init(&mut self) {
+        let clk_freq = CNTFRQ_EL0.get() as u32;
+        self.clk_freq = clk_freq;
+        self.reload_count = clk_freq / 100;
+
+        CNTP_TVAL_EL0.set(self.reload_count as u64);
+
+        CNTP_CTL_EL0.modify(CNTP_CTL_EL0::ENABLE::SET);
+        CNTP_CTL_EL0.modify(CNTP_CTL_EL0::IMASK::CLEAR);
+    }
+
+    pub fn uptime(&self) -> Duration {
         barrier::isb(barrier::SY);
+        let ticks = CNTPCT_EL0.get();
+
+        let secs = ticks / self.clk_freq as u64;
+        let sub_seconds = ticks % self.clk_freq as u64;
+        let nanos =
+            unsafe { sub_seconds.unchecked_mul(1_000_000_000) }.div(self.clk_freq as u64) as u32;
+
+        Duration::new(secs as u64, nanos)
+    }
+
+    pub fn set_irq(&mut self) {
+        CNTP_CTL_EL0.modify(CNTP_CTL_EL0::IMASK::CLEAR);
+    }
+
+    pub fn clear_irq(&mut self) {
+        if CNTP_CTL_EL0.matches_all(CNTP_CTL_EL0::ISTATUS::SET) {
+            CNTP_CTL_EL0.modify(CNTP_CTL_EL0::IMASK::SET);
+        }
+    }
+
+    pub fn reload_count(&mut self) {
+        CNTP_CTL_EL0.modify(CNTP_CTL_EL0::ENABLE::SET);
+        CNTP_CTL_EL0.modify(CNTP_CTL_EL0::IMASK::CLEAR);
+        CNTP_TVAL_EL0.set(self.reload_count as u64);
+    }
+
+    pub fn handle_irq(&mut self) {
+        self.clear_irq();
+
+        switch();
+
+        self.reload_count();
     }
 }

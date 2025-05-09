@@ -1,8 +1,8 @@
 use aarch64_cpu::registers::*;
 
+use crate::mem::paging::table::{PageTable, TableKind};
 use crate::mem::units::VirtAddr;
 use crate::println;
-use crate::task::switch::switch;
 
 core::arch::global_asm!(
     r#"
@@ -60,17 +60,6 @@ unsafe extern "C" {
 
 pub unsafe fn exception_vector_table() -> VirtAddr {
     unsafe { VirtAddr::new_unchecked(&__exception_vectors as *const _ as usize) }
-}
-
-pub unsafe fn init() {
-    unsafe {
-        let addr = exception_vector_table().value();
-
-        core::arch::asm!("
-        msr vbar_el1, {vec}
-        isb
-        ", vec = in(reg) addr, options(nomem, nostack, preserves_flags))
-    }
 }
 
 #[derive(Default)]
@@ -346,9 +335,7 @@ exception_stack!(__sync_current_el_sp0, |stack| {
     panic!("{}", stringify!(__sync_current_el_sp0))
 });
 exception_stack!(__irq_current_el_sp0, |_stack| {
-    let id = super::gic::irq_ack();
-    handle_irq(id);
-    super::gic::eoi(id);
+    handle_irq();
 });
 exception_stack!(__fiq_current_el_sp0, |stack| {
     stack.dump();
@@ -382,9 +369,7 @@ exception_stack!(__sync_current_el_spx, |stack| {
     panic!("{}", stringify!(__sync_current_el_spx))
 });
 exception_stack!(__irq_current_el_spx, |_stack| {
-    let id = super::gic::irq_ack();
-    handle_irq(id);
-    super::gic::eoi(id);
+    handle_irq();
 });
 exception_stack!(__fiq_current_el_spx, |stack| {
     stack.dump();
@@ -406,9 +391,8 @@ exception_stack!(__sync_lower_el_a64, |stack| {
     stack.dump();
     panic!("{}", stringify!(__sync_lower_el_a64))
 });
-exception_stack!(__irq_lower_el_a64, |stack| {
-    stack.dump();
-    panic!("{}", stringify!(__irq_lower_el_a64))
+exception_stack!(__irq_lower_el_a64, |_stack| {
+    handle_irq();
 });
 exception_stack!(__fiq_lower_el_a64, |stack| {
     stack.dump();
@@ -422,9 +406,8 @@ exception_stack!(__sync_lower_el_a32, |stack| {
     stack.dump();
     panic!("{}", stringify!(__sync_lower_el_a32))
 });
-exception_stack!(__irq_lower_el_a32, |stack| {
-    stack.dump();
-    panic!("{}", stringify!(__irq_lower_el_a32))
+exception_stack!(__irq_lower_el_a32, |_stack| {
+    handle_irq();
 });
 exception_stack!(__fiq_lower_el_a32, |stack| {
     stack.dump();
@@ -447,19 +430,26 @@ fn access_flag_fault(_faulted_addr: VirtAddr, caused_by_write: bool, _dfsc: usiz
 fn unhandled_fault(_faulted_addr: VirtAddr, caused_by_write: bool, dfsc: usize) {
     println!("Unhandled fault (write = {caused_by_write})");
     println!("dfsc: {dfsc:#b}");
+
+    let table = PageTable::current(TableKind::Kernel);
+    println!("current table: {}", table.phys_addr());
 }
 
-fn handle_irq(irq: u32) {
-    log::info!("{irq}");
+fn handle_irq() {
+    // let irq = super::gic::irq_ack();
+    // log::info!("{irq}");
 
-    match irq {
-        30 => {
-            CNTP_TVAL_EL0.set(CNTFRQ_EL0.get() * 3 / 1_000_000);
-            switch();
-        }
-        1023 | 1022 => {
-            // spurious
-        }
-        _ => {}
-    }
+    // match irq {
+    //     TIMER_IRQ => {
+    //         // timer
+    //         arm_timer(1_000);
+    //         switch();
+    //     }
+    //     1023 | 1022 => {
+    //         // spurious
+    //     }
+    //     _ => {}
+    // }
+
+    // super::gic::eoi(irq);
 }

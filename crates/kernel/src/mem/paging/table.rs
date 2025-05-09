@@ -1,5 +1,5 @@
 use core::{
-    fmt::Debug,
+    fmt::{Debug, Display},
     ops::{Index, IndexMut},
 };
 
@@ -11,6 +11,7 @@ use crate::{
         MemError,
         units::{PhysAddr, VirtAddr},
     },
+    print, println,
 };
 
 use super::{
@@ -118,9 +119,6 @@ pub struct PageTable {
 impl PageTable {
     pub fn create(kind: TableKind) -> PageTable {
         let frame = unsafe { KernelFrameAllocator.allocate_one().expect("Out of memory") };
-        unsafe {
-            frame.as_hhdm_virt().fill(0, Arch::PAGE_SIZE).unwrap();
-        }
         PageTable {
             frame,
             level: PageTableLevel::Level4,
@@ -147,40 +145,49 @@ impl PageTable {
         self.frame.as_hhdm_virt()
     }
 
+    pub fn is_current(&self) -> bool {
+        unsafe { self.frame == Arch::current_page_table(self.kind) }
+    }
+
     pub unsafe fn make_current(&self) {
         unsafe {
             Arch::set_current_page_table(self.frame, self.kind);
         }
     }
 
-    pub unsafe fn as_raw(&self) -> &RawPageTable {
-        let virt = self.frame.as_hhdm_virt();
-        assert!(virt.is_aligned(Arch::PAGE_SIZE));
-        unsafe { &*virt.as_raw_ptr() }
+    pub unsafe fn entry(&self, index: usize) -> PageTableEntry {
+        unsafe {
+            let addr = self
+                .frame
+                .add(index * size_of::<PageTableEntry>())
+                .as_hhdm_virt();
+            addr.read_volatile().unwrap()
+        }
     }
 
-    pub unsafe fn as_raw_mut(&mut self) -> &mut RawPageTable {
-        let virt = self.frame.as_hhdm_virt();
-        assert!(virt.is_aligned(Arch::PAGE_SIZE));
-        unsafe { &mut *virt.as_raw_ptr_mut() }
-    }
+    pub unsafe fn set_entry(&mut self, index: usize, entry: PageTableEntry) {
+        unsafe {
+            let addr = self
+                .frame
+                .add(index * size_of::<PageTableEntry>())
+                .as_hhdm_virt();
 
-    pub unsafe fn entry(&self, index: usize) -> &PageTableEntry {
-        unsafe { &self.as_raw()[index] }
-    }
-
-    pub unsafe fn entry_mut(&mut self, index: usize) -> &mut PageTableEntry {
-        unsafe { &mut self.as_raw_mut()[index] }
+            addr.write_volatile(entry).unwrap();
+        }
     }
 
     pub fn next_table(&self, index: usize) -> Result<PageTable, MemError> {
         let next_level = self.level.next_down().ok_or(MemError::NoNextTable)?;
         let entry = unsafe { self.entry(index) };
-        Ok(PageTable {
-            frame: entry.addr()?,
-            level: next_level,
-            kind: self.kind,
-        })
+        if entry.is_table() {
+            Ok(PageTable {
+                frame: entry.addr()?,
+                level: next_level,
+                kind: self.kind,
+            })
+        } else {
+            Err(MemError::NoNextTable)
+        }
     }
 
     pub fn next_table_create(
@@ -189,17 +196,16 @@ impl PageTable {
         insert_flags: PageFlags,
     ) -> Result<PageTable, MemError> {
         let next_level = self.level.next_down().ok_or(MemError::NoNextTable)?;
-        let entry = unsafe { self.entry_mut(index) };
-        if entry.is_unused() {
-            let frame = unsafe { KernelFrameAllocator.allocate_one()? };
-            unsafe {
-                frame.as_hhdm_virt().fill(0, Arch::PAGE_SIZE)?;
-            }
-            *entry = PageTableEntry::new(frame, insert_flags);
-        } else {
+        let mut entry = unsafe { self.entry(index) };
+        if entry.is_table() {
             entry.insert_flags(insert_flags);
+            unsafe { self.set_entry(index, entry) };
+        } else {
+            let frame = unsafe { KernelFrameAllocator.allocate_one()? };
+            unsafe { self.set_entry(index, PageTableEntry::new(frame, insert_flags)) };
         }
 
+        let entry = unsafe { self.entry(index) };
         Ok(PageTable {
             frame: entry.addr()?,
             level: next_level,
@@ -207,14 +213,11 @@ impl PageTable {
         })
     }
 
-    pub fn translate(&self, addr: VirtAddr) -> Result<PhysAddr, MemError> {
+    pub fn translate(&self, addr: VirtAddr) -> Result<PageTableEntry, MemError> {
         let p3 = self.next_table(addr.page_table_index(PageTableLevel::Level4))?;
         let p2 = p3.next_table(addr.page_table_index(PageTableLevel::Level3))?;
         let p1 = p2.next_table(addr.page_table_index(PageTableLevel::Level2))?;
-        unsafe {
-            p1.entry(addr.page_table_index(PageTableLevel::Level1))
-                .addr()
-        }
+        unsafe { Ok(p1.entry(addr.page_table_index(PageTableLevel::Level1))) }
     }
 
     pub fn map_to(
@@ -259,15 +262,21 @@ impl PageTable {
         insert_flags: PageFlags,
     ) -> Result<PageFlush, MemError> {
         #[cfg(target_arch = "aarch64")]
-        let flags = flags.with_flag(Arch::PAGE_FLAG_TYPE, false); // unset the "table" bit to make it a "block"
+        let flags = flags.with_flag(Arch::PAGE_FLAG_NON_BLOCK, false); // unset the "table" bit to make it a "block"
 
         let mut p3 =
             self.next_table_create(page.page_table_index(PageTableLevel::Level4), insert_flags)?;
-        let entry = unsafe { p3.entry_mut(page.page_table_index(PageTableLevel::Level3)) };
+        let idx = page.page_table_index(PageTableLevel::Level3);
+        let entry = unsafe { p3.entry(idx) };
         if entry.is_unused() {
-            *entry = PageTableEntry::new(frame, flags.with_flag(Arch::PAGE_FLAG_HUGE, true));
+            unsafe {
+                p3.set_entry(
+                    idx,
+                    PageTableEntry::new(frame, flags.with_flag(Arch::PAGE_FLAG_HUGE, true)),
+                )
+            };
         } else {
-            return Err(MemError::PageAlreadyMapped(*entry));
+            return Err(MemError::PageAlreadyMapped(page, entry));
         }
         Ok(PageFlush::new(page))
     }
@@ -280,18 +289,24 @@ impl PageTable {
         insert_flags: PageFlags,
     ) -> Result<PageFlush, MemError> {
         #[cfg(target_arch = "aarch64")]
-        let flags = flags.with_flag(Arch::PAGE_FLAG_TYPE, false); // unset the "table" bit to make it a "block"
+        let flags = flags.with_flag(Arch::PAGE_FLAG_NON_BLOCK, false); // unset the "table" bit to make it a "block"
 
         let mut p3 =
             self.next_table_create(page.page_table_index(PageTableLevel::Level4), insert_flags)?;
         let mut p2 =
             p3.next_table_create(page.page_table_index(PageTableLevel::Level3), insert_flags)?;
-        let entry = unsafe { p2.entry_mut(page.page_table_index(PageTableLevel::Level2)) };
+        let idx = page.page_table_index(PageTableLevel::Level2);
+        let entry = unsafe { p2.entry(idx) };
 
         if entry.is_unused() {
-            *entry = PageTableEntry::new(frame, flags.with_flag(Arch::PAGE_FLAG_HUGE, true));
+            unsafe {
+                p2.set_entry(
+                    idx,
+                    PageTableEntry::new(frame, flags.with_flag(Arch::PAGE_FLAG_HUGE, true)),
+                )
+            };
         } else {
-            return Err(MemError::PageAlreadyMapped(*entry));
+            return Err(MemError::PageAlreadyMapped(page, entry));
         }
         Ok(PageFlush::new(page))
     }
@@ -309,14 +324,34 @@ impl PageTable {
             p3.next_table_create(page.page_table_index(PageTableLevel::Level3), insert_flags)?;
         let mut p1 =
             p2.next_table_create(page.page_table_index(PageTableLevel::Level2), insert_flags)?;
-        let entry = unsafe { p1.entry_mut(page.page_table_index(PageTableLevel::Level1)) };
+        let idx = page.page_table_index(PageTableLevel::Level1);
+        let entry = unsafe { p1.entry(idx) };
 
         if entry.is_unused() {
-            *entry = PageTableEntry::new(frame, flags);
+            unsafe { p1.set_entry(idx, PageTableEntry::new(frame, flags)) };
         } else {
-            return Err(MemError::PageAlreadyMapped(*entry));
+            return Err(MemError::PageAlreadyMapped(page, entry));
         }
         Ok(PageFlush::new(page))
+    }
+
+    pub fn dump(&self) {
+        for entry_i in 0..Arch::PAGE_ENTRIES {
+            let entry = unsafe { self.entry(entry_i) };
+            if let Ok(addr) = entry.addr() {
+                let flags = entry.flags();
+                if !flags.is_present() {
+                    continue;
+                }
+                for _ in 0..(4 - self.level as usize) {
+                    print!("    ");
+                }
+                println!("{entry_i} = {addr} [{flags}]");
+                if let Ok(next) = self.next_table(entry_i) {
+                    next.dump();
+                }
+            }
+        }
     }
 }
 
@@ -363,6 +398,26 @@ impl PageTableEntry {
         PageFlags::from_raw(self.raw() & Arch::PAGE_ENTRY_FLAGS_MASK)
     }
 
+    pub fn is_table(&self) -> bool {
+        if !self
+            .addr()
+            .is_ok_and(|addr| (Arch::PAGE_SIZE..VirtAddr::MAX_LOW.value()).contains(&addr.value()))
+        {
+            return false;
+        }
+
+        if !self.flags().is_present() || !self.flags().is_writable() {
+            return false;
+        }
+
+        #[cfg(target_arch = "aarch64")]
+        if !self.flags().has_flag(Arch::PAGE_FLAG_NON_BLOCK) {
+            return false;
+        }
+
+        true
+    }
+
     pub fn insert_flags(&mut self, flags: PageFlags) {
         self.0 |= flags.raw();
     }
@@ -395,7 +450,7 @@ impl PageFlags {
     }
 
     pub const fn new_table() -> Self {
-        Self(Arch::PAGE_FLAG_TABLE_DEFAULTS | Arch::PAGE_FLAG_NON_GLOBAL)
+        Self(Arch::PAGE_FLAG_TABLE_DEFAULTS)
     }
 
     pub const fn new_for_text_segment() -> Self {
@@ -465,5 +520,13 @@ impl Debug for PageFlags {
             .field("writable", &self.is_writable())
             .field("executable", &self.is_executable())
             .finish()
+    }
+}
+impl Display for PageFlags {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        let p = if self.is_present() { "P" } else { " " };
+        let w = if self.is_writable() { "W" } else { " " };
+        let e = if self.is_executable() { "E" } else { " " };
+        write!(f, "{p}{w}{e}")
     }
 }

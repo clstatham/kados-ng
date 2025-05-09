@@ -8,7 +8,7 @@ use crate::{
     mem::{
         paging::{
             allocator::KernelFrameAllocator,
-            table::{PageFlags, PageTable, TableKind},
+            table::{BlockSize, PageFlags, PageTable, TableKind},
         },
         units::{PhysAddr, VirtAddr},
     },
@@ -16,8 +16,8 @@ use crate::{
 
 use super::ArchTrait;
 
+pub mod fdt;
 pub mod boot;
-pub mod gic;
 pub mod random;
 pub mod serial;
 pub mod syscall;
@@ -28,7 +28,7 @@ pub mod vectors;
 pub struct AArch64;
 
 impl AArch64 {
-    pub const PAGE_FLAG_TYPE: usize = 1 << 1;
+    pub const PAGE_FLAG_NON_BLOCK: usize = 1 << 1;
     pub const PAGE_FLAG_ACCESS: usize = 1 << 10;
     pub const PAGE_FLAG_NORMAL: usize = 1 << 2;
     pub const PAGE_FLAG_INNER_SHAREABLE: usize = 0b11 << 8;
@@ -36,9 +36,9 @@ impl AArch64 {
 
     pub const PAGE_FLAG_DEVICE: usize =
         Self::PAGE_FLAG_PRESENT      
-            | Self::PAGE_FLAG_TYPE   
+            | Self::PAGE_FLAG_NON_BLOCK   
             | Self::PAGE_FLAG_ACCESS 
-            | (0 << 2) // AttrIdx (0, nGnRE)
+            | (0 << 2) // AttrIdx 0
             | (0 << 6) // AP (RW, priv)
             | Self::PAGE_FLAG_OUTER_SHAREABLE
             | Self::PAGE_FLAG_NON_EXECUTABLE;
@@ -54,13 +54,13 @@ impl ArchTrait for AArch64 {
     const PAGE_ENTRY_ADDR_WIDTH: usize = 40;
 
     const PAGE_FLAG_PAGE_DEFAULTS: usize = Self::PAGE_FLAG_PRESENT
-        | Self::PAGE_FLAG_TYPE
+        | Self::PAGE_FLAG_NON_BLOCK
         | Self::PAGE_FLAG_ACCESS
         | Self::PAGE_FLAG_NORMAL
         | Self::PAGE_FLAG_INNER_SHAREABLE;
 
     const PAGE_FLAG_TABLE_DEFAULTS: usize =
-        Self::PAGE_FLAG_PRESENT | Self::PAGE_FLAG_READWRITE | Self::PAGE_FLAG_TYPE;
+        Self::PAGE_FLAG_PRESENT | Self::PAGE_FLAG_NON_BLOCK;
 
     const PAGE_FLAG_PRESENT: usize = 1 << 0;
 
@@ -87,44 +87,30 @@ impl ArchTrait for AArch64 {
         let frame = PhysAddr::new_canonical(PERIPHERAL_BASE);
         let page = VirtAddr::new_canonical(PERIPHERAL_BASE);
 
-        const PERIPHERAL_SIZE: usize = 2 * 1024 * 1024;
+        const PERIPHERAL_SIZE: usize = 0x200_0000;
 
         unsafe {
-            mapper
-                .kernel_map_range(
-                    page,
-                    frame,
-                    PERIPHERAL_SIZE,
-                    PageFlags::from_raw(Self::PAGE_FLAG_DEVICE),
-                )
-                .unwrap()
-                .ignore();
-        };
+            let mut mapped = 0;
+            while mapped < PERIPHERAL_SIZE {
+                mapper.map_to(page.add(mapped), frame.add(mapped), BlockSize::Page4KiB, PageFlags::from_raw(Self::PAGE_FLAG_DEVICE)).unwrap().ignore();
+                mapped += BlockSize::Page4KiB.size();
+            }
 
-        unsafe {
-            gic::init();
-        }
+        };                
     }
 
     unsafe fn init_post_heap() {}
 
-    #[inline(never)]
     unsafe fn init_interrupts() {
-        unsafe {
-            vectors::init();
-        }
+        
     }
 
     unsafe fn init_cpu_local_block() {
         unsafe {
-            log::debug!("allocate_one");
             let frame = KernelFrameAllocator.allocate_one().unwrap();
             let virt = frame.as_hhdm_virt().as_raw_ptr_mut::<CpuLocalBlock>();
-            log::debug!("init");
             let block = CpuLocalBlock::init();
-            log::debug!("write");
             virt.write(block);
-            log::debug!("set");
             TPIDR_EL1.set(virt as u64);
         }
     }
@@ -133,7 +119,7 @@ impl ArchTrait for AArch64 {
 
     #[inline(always)]
     unsafe fn enable_interrupts() {
-        unsafe { asm!("msr daifclr, #0b1111") }
+        unsafe { asm!("msr daifclr, #0b0001") }
     }
 
     #[inline(always)]
@@ -142,18 +128,19 @@ impl ArchTrait for AArch64 {
     }
 
     unsafe fn interrupts_enabled() -> bool {
-        DAIF.get() & 0b1111 != 0
+        DAIF.get() & 0b0001 != 0
     }
 
     #[inline(always)]
     unsafe fn invalidate_page(addr: VirtAddr) {
         unsafe {
             asm!("
-            dsb ishst
-            tlbi vaae1is, {}
+            dc cvau, {0}
+            dsb ish
+            tlbi vae1is, {0}
             dsb ish
             isb
-        ", in(reg) (addr.value() >> Self::PAGE_SHIFT));
+        ", in(reg) addr.value());
         }
     }
 
@@ -182,12 +169,34 @@ impl ArchTrait for AArch64 {
     #[inline(always)]
     unsafe fn set_current_page_table(addr: PhysAddr, kind: TableKind) {
         unsafe {
-            asm!("dsb ishst");
             match kind {
-                TableKind::Kernel => asm!("msr ttbr1_el1, {}", in(reg) addr.value()),
-                TableKind::User => asm!("msr ttbr0_el1, {}", in(reg) addr.value()),
+                TableKind::Kernel => {
+                    asm!(
+                        "dsb sy",
+                        "msr ttbr1_el1, {0}",
+                        "isb",
+                        "dsb ishst",
+                        "tlbi vmalle1is",
+                        "dsb ish",
+                        "isb",
+                        in(reg) addr.value(),
+                        options(nostack),
+                    );
+                }
+                TableKind::User => {
+                    asm!(
+                        "dsb sy",
+                        "msr ttbr0_el1, {0}",
+                        "isb",
+                        "dsb ishst",
+                        "tlbi vmalle1is",
+                        "dsb ish",
+                        "isb",
+                        in(reg) addr.value(),
+                        options(nostack),
+                    );
+                }
             }
-            Self::invalidate_all();
         }
     }
 

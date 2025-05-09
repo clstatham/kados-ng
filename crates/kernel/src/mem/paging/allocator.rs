@@ -1,5 +1,5 @@
 use alloc::boxed::Box;
-use spin::Once;
+use spin::{Mutex, Once};
 
 use crate::{
     BOOT_INFO,
@@ -8,20 +8,19 @@ use crate::{
         MemError,
         units::{FrameCount, PhysAddr},
     },
-    sync::IrqMutex,
 };
 
 use super::MemMapEntry;
 
-static KERNEL_FRAME_ALLOCATOR: Once<IrqMutex<FrameAllocator>> = Once::new();
+static KERNEL_FRAME_ALLOCATOR: Once<Mutex<FrameAllocator>> = Once::new();
 
 pub fn init_kernel_frame_allocator() {
     let boot_info = BOOT_INFO.get().unwrap();
     KERNEL_FRAME_ALLOCATOR
-        .call_once(|| IrqMutex::new(FrameAllocator::boot(boot_info.mem_map.usable_entries())));
+        .call_once(|| Mutex::new(FrameAllocator::boot(boot_info.mem_map.usable_entries())));
 }
 
-pub fn kernel_frame_allocator() -> &'static IrqMutex<FrameAllocator> {
+pub fn kernel_frame_allocator() -> &'static Mutex<FrameAllocator> {
     KERNEL_FRAME_ALLOCATOR
         .get()
         .expect("kernel frame allocator not initialized")
@@ -151,6 +150,10 @@ impl BumpFrameAllocator {
             break area.base.add(offset);
         };
 
+        unsafe {
+            block.as_hhdm_virt().fill(0, size_bytes)?;
+        }
+
         Ok(block)
     }
 
@@ -187,8 +190,10 @@ impl BuddySystemFrameAllocator {
     }
 
     pub unsafe fn allocate(&mut self, count: FrameCount) -> Result<PhysAddr, MemError> {
-        if let Some(addr) = self.allocator.alloc(count.frame_count()) {
+        if let Some(frame) = self.allocator.alloc(count.frame_count()) {
+            let addr = FrameCount::new(frame).to_bytes();
             let addr = PhysAddr::new_canonical(addr);
+            unsafe { addr.as_hhdm_virt().fill(0, count.to_bytes())? };
             Ok(addr)
         } else {
             Err(MemError::OutOfMemory)
