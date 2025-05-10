@@ -268,10 +268,12 @@ pub enum Errno {
 }
 
 impl Errno {
-    pub fn result_to_isize(res: Result<isize, Errno>) -> isize {
+    pub fn result_to_isize(res: core::result::Result<isize, Errno>) -> isize {
         match res {
             Ok(retval) => retval,
             Err(e) => -(e as i32 as isize),
         }
     }
 }
+
+pub type Result<T> = core::result::Result<T, Errno>;

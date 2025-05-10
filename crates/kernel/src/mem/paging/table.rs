@@ -159,7 +159,7 @@ impl PageTable {
         unsafe {
             let addr = self
                 .frame
-                .add(index * size_of::<PageTableEntry>())
+                .add_bytes(index * size_of::<PageTableEntry>())
                 .as_hhdm_virt();
             addr.read_volatile().unwrap()
         }
@@ -169,7 +169,7 @@ impl PageTable {
         unsafe {
             let addr = self
                 .frame
-                .add(index * size_of::<PageTableEntry>())
+                .add_bytes(index * size_of::<PageTableEntry>())
                 .as_hhdm_virt();
 
             addr.write_volatile(entry).unwrap();
@@ -247,8 +247,8 @@ impl PageTable {
             let flush = self.map_to(page, frame, block_size, flags)?;
             unsafe { flush.ignore() };
 
-            page = page.add(block_size.size());
-            frame = frame.add(block_size.size());
+            page = page.add_bytes(block_size.size());
+            frame = frame.add_bytes(block_size.size());
             size -= block_size.size();
         }
         Ok(PageFlushAll)
@@ -463,6 +463,11 @@ impl PageFlags {
 
     pub fn new_for_data_segment() -> Self {
         Self::new().writable()
+    }
+
+    #[cfg(target_arch = "aarch64")]
+    pub fn new_device() -> Self {
+        Self::from_raw(Arch::PAGE_FLAG_DEVICE)
     }
 
     pub const fn from_raw(raw: usize) -> Self {

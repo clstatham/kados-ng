@@ -1,5 +1,6 @@
 use aarch64_cpu::registers::*;
 
+use crate::dtb::irq_chip;
 use crate::mem::paging::table::{PageTable, TableKind};
 use crate::mem::units::VirtAddr;
 use crate::println;
@@ -436,20 +437,10 @@ fn unhandled_fault(_faulted_addr: VirtAddr, caused_by_write: bool, dfsc: usize) 
 }
 
 fn handle_irq() {
-    // let irq = super::gic::irq_ack();
-    // log::info!("{irq}");
+    let chip = unsafe { irq_chip() };
+    let irq = chip.ack();
 
-    // match irq {
-    //     TIMER_IRQ => {
-    //         // timer
-    //         arm_timer(1_000);
-    //         switch();
-    //     }
-    //     1023 | 1022 => {
-    //         // spurious
-    //     }
-    //     _ => {}
-    // }
-
-    // super::gic::eoi(irq);
+    log::trace!("IRQ {irq} caught");
+    chip.handle_irq(irq);
+    chip.eoi(irq);
 }

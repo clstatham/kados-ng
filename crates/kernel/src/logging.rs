@@ -20,15 +20,15 @@ impl log::Log for Logger {
 
     fn log(&self, record: &log::Record) {
         let level = record.level();
-        let uptime = crate::arch::time::uptime();
+        let uptime = crate::time::uptime();
         let uptime_secs = uptime.as_secs();
         let uptime_subsec_nanos = uptime.subsec_nanos();
         let pid = match context::current() {
             Some(cx) => match cx.try_read() {
-                Some(cx) => format!("[{}] ", cx.pid),
-                None => String::new(),
+                Some(cx) => &format!("[{}]", cx.pid),
+                None => "[-]",
             },
-            None => String::new(),
+            None => "[-]",
         };
 
         let level_str = match level {
@@ -48,13 +48,13 @@ impl log::Log for Logger {
         let reset = "\x1b[0m"; // Reset color
         let target = record.target().split("::").last().unwrap_or("");
         crate::serial::write_fmt(format_args!(
-            "{}[{}]{} {}[{}.{:09}] [{}] {}\n",
+            "{}[{}]{} [{}.{:09}] {} [{}] {}\n",
             color,
             level_str,
             reset,
-            pid,
             uptime_secs,
             uptime_subsec_nanos,
+            pid,
             target,
             record.args(),
         ));
@@ -74,10 +74,10 @@ impl log::Log for Logger {
             fb.write_fmt(format_args!("{level_str}")).ok();
             fb.set_text_fgcolor_default();
             fb.write_fmt(format_args!(
-                "] {}[{}.{:09}] [{}] {}\n",
-                pid,
+                "] [{}.{:09}] {} [{}] {}\n",
                 uptime_secs,
                 uptime_subsec_nanos,
+                pid,
                 target,
                 record.args()
             ))
@@ -90,6 +90,6 @@ impl log::Log for Logger {
 
 pub fn init() {
     log::set_logger(&Logger).unwrap();
-    log::set_max_level(log::LevelFilter::Trace);
+    log::set_max_level(log::LevelFilter::Debug);
     log::info!("Logger initialized");
 }

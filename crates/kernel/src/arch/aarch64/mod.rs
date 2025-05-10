@@ -1,29 +1,29 @@
 use core::arch::asm;
 
 use aarch64_cpu::registers::*;
+use alloc::boxed::Box;
 use serial::PERIPHERAL_BASE;
 
 use crate::{
-    cpu_local::CpuLocalBlock,
-    mem::{
+    cpu_local::CpuLocalBlock, dtb::IrqChipTrait, mem::{
         paging::{
             allocator::KernelFrameAllocator,
             table::{BlockSize, PageFlags, PageTable, TableKind},
         },
         units::{PhysAddr, VirtAddr},
-    },
+    }
 };
 
 use super::ArchTrait;
 
-pub mod fdt;
+pub mod gic;
 pub mod boot;
-pub mod random;
 pub mod serial;
 pub mod syscall;
 pub mod task;
 pub mod time;
 pub mod vectors;
+pub mod mmio;
 
 pub struct AArch64;
 
@@ -85,25 +85,23 @@ impl ArchTrait for AArch64 {
 
     unsafe fn init_mem(mapper: &mut PageTable) {
         let frame = PhysAddr::new_canonical(PERIPHERAL_BASE);
-        let page = VirtAddr::new_canonical(PERIPHERAL_BASE);
+        let page = frame.as_hhdm_virt();
 
         const PERIPHERAL_SIZE: usize = 0x200_0000;
 
         unsafe {
             let mut mapped = 0;
             while mapped < PERIPHERAL_SIZE {
-                mapper.map_to(page.add(mapped), frame.add(mapped), BlockSize::Page4KiB, PageFlags::from_raw(Self::PAGE_FLAG_DEVICE)).unwrap().ignore();
+                mapper.map_to(page.add_bytes(mapped), frame.add_bytes(mapped), BlockSize::Page4KiB, PageFlags::from_raw(Self::PAGE_FLAG_DEVICE)).unwrap().ignore();
                 mapped += BlockSize::Page4KiB.size();
             }
+        };
 
-        };                
     }
 
     unsafe fn init_post_heap() {}
 
-    unsafe fn init_interrupts() {
-        
-    }
+    unsafe fn init_interrupts() {}
 
     unsafe fn init_cpu_local_block() {
         unsafe {
@@ -119,16 +117,21 @@ impl ArchTrait for AArch64 {
 
     #[inline(always)]
     unsafe fn enable_interrupts() {
-        unsafe { asm!("msr daifclr, #0b0001") }
+        DAIF.modify(DAIF::I::CLEAR);
+        log::trace!("interrupts enabled");
     }
 
     #[inline(always)]
     unsafe fn disable_interrupts() {
-        unsafe { asm!("msr daifset, #0b1111") }
+        DAIF.modify(DAIF::D::SET);
+        DAIF.modify(DAIF::A::SET);
+        DAIF.modify(DAIF::I::SET);
+        DAIF.modify(DAIF::F::SET);
+        log::trace!("interrupts disabled");
     }
 
     unsafe fn interrupts_enabled() -> bool {
-        DAIF.get() & 0b0001 != 0
+        !DAIF.is_set(DAIF::I) // IRQ flag NOT masked = IRQs enabled
     }
 
     #[inline(always)]
@@ -138,7 +141,7 @@ impl ArchTrait for AArch64 {
             dc cvau, {0}
             dsb ish
             tlbi vae1is, {0}
-            dsb ish
+            dsb sy
             isb
         ", in(reg) addr.value());
         }
@@ -230,6 +233,15 @@ impl ArchTrait for AArch64 {
 
     fn current_cpu_local_block() -> VirtAddr {
         VirtAddr::new_canonical(TPIDR_EL1.get() as usize)
+    }
+
+    fn new_irq_chip(compatible: &str) -> Option<Box<dyn IrqChipTrait>> {
+        if compatible.contains("arm,gic-400") {
+            Some(Box::new(gic::Gic::default()))
+        } else {
+            log::warn!("No interrupt chip driver for {compatible}");
+            None
+        }
     }
 
     fn emergency_reset() -> ! {

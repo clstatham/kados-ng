@@ -1,8 +1,8 @@
 use alloc::boxed::Box;
-use spin::{Mutex, Once};
+use spin::{Mutex, MutexGuard, Once};
 
 use crate::{
-    BOOT_INFO,
+    BootInfo,
     arch::{Arch, ArchTrait},
     mem::{
         MemError,
@@ -14,16 +14,16 @@ use super::MemMapEntry;
 
 static KERNEL_FRAME_ALLOCATOR: Once<Mutex<FrameAllocator>> = Once::new();
 
-pub fn init_kernel_frame_allocator() {
-    let boot_info = BOOT_INFO.get().unwrap();
+pub fn init_kernel_frame_allocator(boot_info: &'static BootInfo) {
     KERNEL_FRAME_ALLOCATOR
         .call_once(|| Mutex::new(FrameAllocator::boot(boot_info.mem_map.usable_entries())));
 }
 
-pub fn kernel_frame_allocator() -> &'static Mutex<FrameAllocator> {
+pub fn kernel_frame_allocator<'a>() -> MutexGuard<'a, FrameAllocator> {
     KERNEL_FRAME_ALLOCATOR
         .get()
         .expect("kernel frame allocator not initialized")
+        .lock()
 }
 
 pub enum FrameAllocator {
@@ -49,7 +49,7 @@ impl FrameAllocator {
 
             // inherit whatever's left of our first free area
             let first_free_area = bump.areas.first().ok_or(MemError::OutOfMemory)?;
-            let first_base = first_free_area.base.add(bump.bump);
+            let first_base = first_free_area.base.add_bytes(bump.bump);
             let first_size = first_free_area.size.to_bytes() - bump.bump;
             let index = first_base.frame_index();
             let count = FrameCount::from_bytes(first_size);
@@ -104,7 +104,7 @@ pub struct KernelFrameAllocator;
 
 impl KernelFrameAllocator {
     pub unsafe fn allocate(&mut self, count: FrameCount) -> Result<PhysAddr, MemError> {
-        unsafe { kernel_frame_allocator().lock().allocate(count) }
+        unsafe { kernel_frame_allocator().allocate(count) }
     }
 
     pub unsafe fn allocate_one(&mut self) -> Result<PhysAddr, MemError> {
@@ -112,11 +112,11 @@ impl KernelFrameAllocator {
     }
 
     pub fn free(&mut self, start: PhysAddr, count: FrameCount) -> Result<(), MemError> {
-        kernel_frame_allocator().lock().free(start, count)
+        kernel_frame_allocator().free(start, count)
     }
 
     pub fn usage(&self) -> Option<FrameCount> {
-        kernel_frame_allocator().lock().usage()
+        kernel_frame_allocator().usage()
     }
 }
 
@@ -147,7 +147,7 @@ impl BumpFrameAllocator {
                 continue;
             }
             self.bump += size_bytes;
-            break area.base.add(offset);
+            break area.base.add_bytes(offset);
         };
 
         unsafe {

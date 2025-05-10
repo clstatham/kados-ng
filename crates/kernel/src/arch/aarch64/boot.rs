@@ -152,7 +152,7 @@ pub unsafe extern "C" fn mmu_init_el2(dtb_ptr: *const u8, _zero: usize) -> ! {
             "msr    elr_el2,  {entry}",
             "eret",
 
-            mair        = in(reg) 0b11111111_00000000u64,
+            mair        = in(reg) ((0xff << 8) | 0x00) as u64,
             tcr         = in(reg) (TCR0|TCR1) as u64,
             ttbr0       = in(reg) l0,
             ttbr1       = in(reg) l0,

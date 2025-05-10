@@ -1,13 +1,18 @@
 #[cfg(target_arch = "aarch64")]
 pub mod aarch64;
+use alloc::boxed::Box;
+
 #[cfg(target_arch = "aarch64")]
 pub use self::aarch64::AArch64 as Arch;
 #[cfg(target_arch = "aarch64")]
 pub use self::aarch64::*;
 
-use crate::mem::{
-    paging::table::{PageTable, TableKind},
-    units::{PhysAddr, VirtAddr},
+use crate::{
+    dtb::IrqChipTrait,
+    mem::{
+        paging::table::{PageTable, TableKind},
+        units::{PhysAddr, VirtAddr},
+    },
 };
 
 pub trait ArchTrait {
@@ -74,6 +79,8 @@ pub trait ArchTrait {
     fn frame_pointer() -> usize;
 
     fn current_cpu_local_block() -> VirtAddr;
+
+    fn new_irq_chip(compatible: &str) -> Option<Box<dyn IrqChipTrait>>;
 
     fn emergency_reset() -> !;
     fn exit_qemu(code: u32) -> !;

@@ -3,7 +3,7 @@ use table::{BlockSize, PageFlags, PageTable, TableKind};
 
 use crate::{
     __kernel_phys_end, __kernel_phys_start, __rodata_end, __rodata_start, __text_end, __text_start,
-    BOOT_INFO, KERNEL_OFFSET,
+    BootInfo, KERNEL_OFFSET,
     arch::{Arch, ArchTrait},
     mem::{
         heap::{KERNEL_HEAP_SIZE, KERNEL_HEAP_START},
@@ -33,9 +33,6 @@ impl MemMapEntry {
 pub struct MemMapEntries<const N: usize> {
     pub usable_entries: [MemMapEntry; N],
     pub usable_entry_count: usize,
-    pub identity_map_entries: [MemMapEntry; N],
-    pub identity_map_entry_count: usize,
-    pub kernel_entry: MemMapEntry,
 }
 
 impl<const N: usize> MemMapEntries<N> {
@@ -43,9 +40,6 @@ impl<const N: usize> MemMapEntries<N> {
         MemMapEntries {
             usable_entries: [MemMapEntry::EMPTY; N],
             usable_entry_count: 0,
-            identity_map_entries: [MemMapEntry::EMPTY; N],
-            identity_map_entry_count: 0,
-            kernel_entry: MemMapEntry::EMPTY,
         }
     }
 
@@ -54,44 +48,23 @@ impl<const N: usize> MemMapEntries<N> {
         self.usable_entry_count += 1;
     }
 
-    pub fn push_identity_map(&mut self, entry: MemMapEntry) {
-        self.identity_map_entries[self.identity_map_entry_count] = entry;
-        self.identity_map_entry_count += 1;
-    }
-
-    pub fn set_kernel_entry(&mut self, entry: MemMapEntry) {
-        self.kernel_entry = entry;
-    }
-
-    pub fn kernel_entry(&self) -> MemMapEntry {
-        self.kernel_entry
-    }
-
     pub fn usable_entries(&self) -> &[MemMapEntry] {
         &self.usable_entries[..self.usable_entry_count]
     }
-
-    pub fn identity_map_entries(&self) -> &[MemMapEntry] {
-        &self.identity_map_entries[..self.identity_map_entry_count]
-    }
 }
 
-pub unsafe fn map_memory() {
-    let mem_map = &BOOT_INFO.get().unwrap().mem_map;
+pub unsafe fn map_memory(boot_info: &BootInfo) {
+    let mem_map = &boot_info.mem_map;
 
     let mut table = PageTable::create(TableKind::Kernel);
     log::debug!("mapping free areas");
-    for entry in mem_map
-        .usable_entries()
-        .iter()
-        .chain(mem_map.identity_map_entries())
-    {
+    for entry in mem_map.usable_entries() {
         log::debug!(
             ">>> {} .. {} => {} .. {}",
             entry.base,
-            entry.base.add(entry.size.to_bytes()),
+            entry.base.add_bytes(entry.size.to_bytes()),
             entry.base.as_hhdm_virt(),
-            entry.base.as_hhdm_virt().add(entry.size.to_bytes()),
+            entry.base.as_hhdm_virt().add_bytes(entry.size.to_bytes()),
         );
         let phys = entry.base;
         let virt = phys.as_hhdm_virt();
@@ -150,9 +123,9 @@ pub unsafe fn map_memory() {
     log::debug!(
         ">>> {} .. {} => {} .. {}",
         frames,
-        frames.add(KERNEL_HEAP_SIZE),
+        frames.add_bytes(KERNEL_HEAP_SIZE),
         VirtAddr::new_canonical(KERNEL_HEAP_START),
-        VirtAddr::new_canonical(KERNEL_HEAP_START).add(KERNEL_HEAP_SIZE),
+        VirtAddr::new_canonical(KERNEL_HEAP_START).add_bytes(KERNEL_HEAP_SIZE),
     );
     let flush = table
         .kernel_map_range(
@@ -171,5 +144,4 @@ pub unsafe fn map_memory() {
     }
 
     log::debug!("New page table: {:?}", table.phys_addr());
-    // table.dump();
 }

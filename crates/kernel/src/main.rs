@@ -7,7 +7,7 @@
     clippy::identity_op,
     clippy::unnecessary_cast
 )]
-#![feature(if_let_guard, iter_next_chunk)]
+#![feature(if_let_guard, iter_next_chunk, array_chunks)]
 
 use arch::{Arch, ArchTrait};
 use fdt::Fdt;
@@ -22,10 +22,12 @@ extern crate alloc;
 
 pub mod arch;
 pub mod cpu_local;
+pub mod dtb;
 pub mod logging;
 pub mod serial;
 pub mod syscall;
 pub mod task;
+pub mod time;
 #[macro_use]
 pub mod framebuffer;
 pub mod mem;
@@ -82,9 +84,9 @@ pub(crate) fn kernel_main() -> ! {
         Arch::disable_interrupts();
 
         Arch::init_pre_kernel_main();
-
-        arch::time::init();
     }
+
+    let boot_info = BOOT_INFO.get().unwrap();
 
     arch::serial::init();
 
@@ -105,35 +107,14 @@ pub(crate) fn kernel_main() -> ! {
 
     logging::init();
 
-    // let kernel_elf_physaddr = __boot_start();
-    // let kernel_size = __kernel_phys_end() - __boot_start();
-    // KERNEL_ELF_PHYSADDR.call_once(|| PhysAddr::new_canonical(kernel_elf_physaddr));
-    // KERNEL_ELF_SIZE.call_once(|| kernel_size);
-
-    // let fb_tag = FRAMEBUFFER_REQUEST.get_response().unwrap();
-    // let fb0 = fb_tag.framebuffers().next().unwrap();
-    // FRAMEBUFFER_INFO.call_once(|| FramebufferInfo {
-    //     base: fb0.addr() as usize,
-    //     width: fb0.width() as usize,
-    //     height: fb0.height() as usize,
-    //     bpp: fb0.bpp() as usize,
-    // });
-
     log::info!("kernel starting...");
 
-    init_kernel_frame_allocator();
+    init_kernel_frame_allocator(boot_info);
 
     log::info!("initializing memory...");
     unsafe {
-        mem::paging::map_memory();
+        mem::paging::map_memory(boot_info);
     }
-
-    // log::info!("Initializing kernel ELF file info");
-    // let kernel_file_addr = KERNEL_ELF_PHYSADDR.get().unwrap().as_hhdm_virt();
-    // let kernel_file_size = *KERNEL_ELF_SIZE.get().unwrap();
-    // let kernel_file_data =
-    //     unsafe { core::slice::from_raw_parts(kernel_file_addr.as_raw_ptr(), kernel_file_size) };
-    // KERNEL_ELF.call_once(|| ElfFile::new(kernel_file_data).expect("Error parsing kernel ELF file"));
 
     log::info!("initializing interrupts...");
 
@@ -156,11 +137,15 @@ pub(crate) fn kernel_main() -> ! {
         Arch::init_cpu_local_block();
     }
 
-    // log::info!("Initializing framebuffer");
-    // framebuffer::init(*FRAMEBUFFER_INFO.get().unwrap());
-
     log::info!("initializing frame allocator (post-heap)...");
-    kernel_frame_allocator().lock().convert_post_heap().unwrap();
+    kernel_frame_allocator().convert_post_heap().unwrap();
+
+    log::info!("initializing device tree...");
+    let fdt = boot_info.fdt.as_ref().unwrap();
+    dtb::init(fdt);
+
+    log::info!("initializing timer...");
+    arch::time::init(fdt);
 
     log::info!("initializing task contexts...");
     task::context::init();
@@ -169,15 +154,11 @@ pub(crate) fn kernel_main() -> ! {
 
     task::spawn(false, test).unwrap();
 
-    log::info!("kernel boot finished after {:?}", arch::time::uptime());
     log::info!("welcome to KaDOS!");
 
-    unsafe {
-        loop {
-            Arch::enable_interrupts();
-            Arch::halt();
-        }
-    }
+    unsafe { Arch::enable_interrupts() };
+
+    Arch::hcf();
 }
 
 extern "C" fn test() {
