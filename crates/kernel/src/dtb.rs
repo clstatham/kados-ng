@@ -40,6 +40,10 @@ pub unsafe fn register_irq(irq: Irq, handler: impl IrqHandlerTrait) {
     irq_chip.descs[irq.as_usize()].handler = Some(Box::new(handler));
 }
 
+pub unsafe fn enable_irq(irq: Irq) {
+    unsafe { irq_chip().enable_irq(irq) }
+}
+
 #[derive(Debug, Copy, Clone)]
 pub enum IrqCell {
     L1(u32),

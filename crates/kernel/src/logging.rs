@@ -1,6 +1,6 @@
 use core::fmt::Write;
 
-use alloc::{format, string::String};
+use alloc::format;
 use embedded_graphics::prelude::{RgbColor, WebColors};
 
 use crate::{

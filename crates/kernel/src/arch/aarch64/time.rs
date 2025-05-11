@@ -4,12 +4,9 @@ use aarch64_cpu::{asm::barrier, registers::*};
 use fdt::Fdt;
 
 use crate::{
-    dtb::{Irq, IrqHandlerTrait, irq_chip, register_irq},
-    mem::units::VirtAddr,
+    dtb::{Irq, IrqHandlerTrait, enable_irq, register_irq},
     task::switch::switch,
 };
-
-use super::mmio::Mmio;
 
 pub fn init(_fdt: &Fdt) {
     let mut timer = GenericTimer::default();
@@ -17,49 +14,7 @@ pub fn init(_fdt: &Fdt) {
 
     let irq = Irq(30);
     unsafe { register_irq(irq, timer) };
-    unsafe { irq_chip().enable_irq(irq) };
-}
-
-pub struct SystemTimer {
-    pub base: Mmio<u32>,
-    pub interval_micros: u32,
-}
-
-impl SystemTimer {
-    pub const CS: usize = 0x00;
-    pub const CLO: usize = 0x04;
-    pub const C1: usize = 0x10;
-
-    pub fn new(base: VirtAddr, interval_micros: u32) -> Self {
-        Self {
-            base: Mmio::new(base),
-            interval_micros,
-        }
-    }
-
-    pub fn init(&mut self) {
-        unsafe {
-            let now = self.base.read(Self::CLO);
-            self.base
-                .write_assert(Self::C1, now.wrapping_add(self.interval_micros));
-            self.base.write(Self::CS, 1 << 1);
-        }
-    }
-}
-
-impl IrqHandlerTrait for SystemTimer {
-    fn handle_irq(&mut self, _irq: Irq) {
-        *crate::time::UPTIME.lock() += self.interval_micros as u64;
-        switch();
-
-        unsafe {
-            self.base.write(Self::CS, 1 << 1);
-            self.base.write_assert(
-                Self::C1,
-                self.base.read(Self::C1).wrapping_add(self.interval_micros),
-            );
-        }
-    }
+    unsafe { enable_irq(irq) };
 }
 
 #[derive(Debug, Default)]
@@ -109,7 +64,7 @@ pub fn uptime() -> Duration {
 
     let secs = ticks / clk_freq;
     let sub_seconds = ticks % clk_freq;
-    let nanos = (unsafe { sub_seconds.unchecked_mul(1_000_000_000) } / clk_freq) as u32;
+    let nanos = (sub_seconds * 1_000_000_000 / clk_freq) as u32;
 
     Duration::new(secs as u64, nanos)
 }
