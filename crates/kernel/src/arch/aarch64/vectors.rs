@@ -3,7 +3,7 @@ use aarch64_cpu::registers::*;
 use crate::dtb::irq_chip;
 use crate::mem::paging::table::{PageTable, TableKind};
 use crate::mem::units::VirtAddr;
-use crate::println;
+use crate::serial_println;
 
 core::arch::global_asm!(
     r#"
@@ -74,10 +74,10 @@ pub struct IretRegs {
 
 impl IretRegs {
     pub fn dump(&self) {
-        println!("ELR_EL1: {:>016X}", { self.elr_el1 });
-        println!("SPSR_EL1: {:>016X}", { self.spsr_el1 });
-        println!("ESR_EL1: {:>016X}", { self.esr_el1 });
-        println!("SP_EL0: {:>016X}", { self.sp_el0 });
+        serial_println!("ELR_EL1: {:>016X}", { self.elr_el1 });
+        serial_println!("SPSR_EL1: {:>016X}", { self.spsr_el1 });
+        serial_println!("ESR_EL1: {:>016X}", { self.esr_el1 });
+        serial_println!("SP_EL0: {:>016X}", { self.sp_el0 });
     }
 }
 
@@ -108,25 +108,25 @@ pub struct ScratchRegs {
 
 impl ScratchRegs {
     pub fn dump(&self) {
-        println!("X0:    {:>016X}", { self.x0 });
-        println!("X1:    {:>016X}", { self.x1 });
-        println!("X2:    {:>016X}", { self.x2 });
-        println!("X3:    {:>016X}", { self.x3 });
-        println!("X4:    {:>016X}", { self.x4 });
-        println!("X5:    {:>016X}", { self.x5 });
-        println!("X6:    {:>016X}", { self.x6 });
-        println!("X7:    {:>016X}", { self.x7 });
-        println!("X8:    {:>016X}", { self.x8 });
-        println!("X9:    {:>016X}", { self.x9 });
-        println!("X10:   {:>016X}", { self.x10 });
-        println!("X11:   {:>016X}", { self.x11 });
-        println!("X12:   {:>016X}", { self.x12 });
-        println!("X13:   {:>016X}", { self.x13 });
-        println!("X14:   {:>016X}", { self.x14 });
-        println!("X15:   {:>016X}", { self.x15 });
-        println!("X16:   {:>016X}", { self.x16 });
-        println!("X17:   {:>016X}", { self.x17 });
-        println!("X18:   {:>016X}", { self.x18 });
+        serial_println!("X0:    {:>016X}", { self.x0 });
+        serial_println!("X1:    {:>016X}", { self.x1 });
+        serial_println!("X2:    {:>016X}", { self.x2 });
+        serial_println!("X3:    {:>016X}", { self.x3 });
+        serial_println!("X4:    {:>016X}", { self.x4 });
+        serial_println!("X5:    {:>016X}", { self.x5 });
+        serial_println!("X6:    {:>016X}", { self.x6 });
+        serial_println!("X7:    {:>016X}", { self.x7 });
+        serial_println!("X8:    {:>016X}", { self.x8 });
+        serial_println!("X9:    {:>016X}", { self.x9 });
+        serial_println!("X10:   {:>016X}", { self.x10 });
+        serial_println!("X11:   {:>016X}", { self.x11 });
+        serial_println!("X12:   {:>016X}", { self.x12 });
+        serial_println!("X13:   {:>016X}", { self.x13 });
+        serial_println!("X14:   {:>016X}", { self.x14 });
+        serial_println!("X15:   {:>016X}", { self.x15 });
+        serial_println!("X16:   {:>016X}", { self.x16 });
+        serial_println!("X17:   {:>016X}", { self.x17 });
+        serial_println!("X18:   {:>016X}", { self.x18 });
     }
 }
 
@@ -149,18 +149,18 @@ pub struct PreservedRegs {
 
 impl PreservedRegs {
     pub fn dump(&self) {
-        println!("X19:   {:>016X}", { self.x19 });
-        println!("X20:   {:>016X}", { self.x20 });
-        println!("X21:   {:>016X}", { self.x21 });
-        println!("X22:   {:>016X}", { self.x22 });
-        println!("X23:   {:>016X}", { self.x23 });
-        println!("X24:   {:>016X}", { self.x24 });
-        println!("X25:   {:>016X}", { self.x25 });
-        println!("X26:   {:>016X}", { self.x26 });
-        println!("X27:   {:>016X}", { self.x27 });
-        println!("X28:   {:>016X}", { self.x28 });
-        println!("X29:   {:>016X}", { self.x29 });
-        println!("X30:   {:>016X}", { self.x30 });
+        serial_println!("X19:   {:>016X}", { self.x19 });
+        serial_println!("X20:   {:>016X}", { self.x20 });
+        serial_println!("X21:   {:>016X}", { self.x21 });
+        serial_println!("X22:   {:>016X}", { self.x22 });
+        serial_println!("X23:   {:>016X}", { self.x23 });
+        serial_println!("X24:   {:>016X}", { self.x24 });
+        serial_println!("X25:   {:>016X}", { self.x25 });
+        serial_println!("X26:   {:>016X}", { self.x26 });
+        serial_println!("X27:   {:>016X}", { self.x27 });
+        serial_println!("X28:   {:>016X}", { self.x28 });
+        serial_println!("X29:   {:>016X}", { self.x29 });
+        serial_println!("X30:   {:>016X}", { self.x30 });
     }
 }
 
@@ -347,13 +347,13 @@ exception_stack!(__serr_current_el_sp0, |stack| {
     panic!("{}", stringify!(__serr_current_el_sp0))
 });
 exception_stack!(__sync_current_el_spx, |stack| {
-    println!("SYNCHRONOUS EXCEPTION (current EL, SPX)");
+    serial_println!("SYNCHRONOUS EXCEPTION (current EL, SPX)");
     let error_code = exception_code(stack.iret.esr_el1);
-    println!("Code: {error_code:#x}");
+    serial_println!("Code: {error_code:#x}");
     if error_code == 0x25 {
-        println!("Translation Fault");
+        serial_println!("Translation Fault");
         let faulted_addr = unsafe { VirtAddr::new_unchecked(FAR_EL1.get() as usize) };
-        println!("Faulted addr: {faulted_addr}");
+        serial_println!("Faulted addr: {faulted_addr}");
 
         let iss = stack.iret.esr_el1 & 0x1ffffff;
         let wn_r = (iss >> 6) & 1 == 1;
@@ -420,20 +420,20 @@ exception_stack!(__serr_lower_el_a32, |stack| {
 });
 
 fn page_not_present(_faulted_addr: VirtAddr, caused_by_write: bool, _dfsc: usize) {
-    println!("Page not present (write = {caused_by_write})");
+    serial_println!("Page not present (write = {caused_by_write})");
 }
 fn permission_fault(_faulted_addr: VirtAddr, caused_by_write: bool, _dfsc: usize) {
-    println!("Permission fault (write = {caused_by_write})");
+    serial_println!("Permission fault (write = {caused_by_write})");
 }
 fn access_flag_fault(_faulted_addr: VirtAddr, caused_by_write: bool, _dfsc: usize) {
-    println!("Access flag fault (write = {caused_by_write})");
+    serial_println!("Access flag fault (write = {caused_by_write})");
 }
 fn unhandled_fault(_faulted_addr: VirtAddr, caused_by_write: bool, dfsc: usize) {
-    println!("Unhandled fault (write = {caused_by_write})");
-    println!("dfsc: {dfsc:#b}");
+    serial_println!("Unhandled fault (write = {caused_by_write})");
+    serial_println!("dfsc: {dfsc:#b}");
 
     let table = PageTable::current(TableKind::Kernel);
-    println!("current table: {}", table.phys_addr());
+    serial_println!("current table: {}", table.phys_addr());
 }
 
 fn handle_irq() {

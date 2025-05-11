@@ -100,7 +100,23 @@ impl PhysAddr {
 }
 
 #[derive(
-    Clone, Copy, PartialEq, PartialOrd, Eq, Ord, Hash, Add, Sub, Mul, Div, Rem, Deref, Default,
+    Clone,
+    Copy,
+    PartialEq,
+    PartialOrd,
+    Eq,
+    Ord,
+    Hash,
+    Add,
+    Sub,
+    Mul,
+    Div,
+    Rem,
+    Deref,
+    Default,
+    UpperHex,
+    LowerHex,
+    Binary,
 )]
 #[repr(transparent)]
 pub struct VirtAddr(usize);

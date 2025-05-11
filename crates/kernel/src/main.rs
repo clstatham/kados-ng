@@ -179,6 +179,13 @@ macro_rules! print {
 }
 
 #[macro_export]
+macro_rules! serial_print {
+    ($($arg:tt)*) => {
+        let _ = $crate::serial::write_fmt(format_args!($($arg)*));
+    };
+}
+
+#[macro_export]
 macro_rules! println {
     () => ({
         let _ = $crate::serial::write_fmt(format_args!("\n"));
@@ -189,5 +196,15 @@ macro_rules! println {
         let _ = $crate::serial::write_fmt(format_args!("\n"));
         let _ = $crate::framebuffer::write_fmt(format_args!($($arg)*));
         let _ = $crate::framebuffer::write_fmt(format_args!("\n"));
+    });
+}
+#[macro_export]
+macro_rules! serial_println {
+    () => ({
+        let _ = $crate::serial::write_fmt(format_args!("\n"));
+    });
+    ($($arg:tt)*) => ({
+        let _ = $crate::serial::write_fmt(format_args!($($arg)*));
+        let _ = $crate::serial::write_fmt(format_args!("\n"));
     });
 }

@@ -52,6 +52,7 @@ impl FbChar {
 pub struct FrameBuffer {
     back_buffer: Box<[u32]>,
     start_addr: VirtAddr,
+    size_bytes: usize,
     width: usize,
     height: usize,
     bpp: usize,
@@ -72,6 +73,14 @@ impl FrameBuffer {
 
     pub fn bpp(&self) -> usize {
         self.bpp
+    }
+
+    pub fn size_pixels(&self) -> usize {
+        self.width * self.height
+    }
+
+    pub fn size_bytes(&self) -> usize {
+        self.size_bytes
     }
 
     pub fn set_text_fgcolor(&mut self, color: Color) {
@@ -106,7 +115,10 @@ impl FrameBuffer {
         unsafe {
             self.start_addr
                 .as_raw_ptr_mut::<u32>()
-                .copy_from_nonoverlapping(self.back_buffer.as_ptr(), self.width * self.height);
+                .copy_from_nonoverlapping(
+                    self.back_buffer.as_ptr(),
+                    self.size_bytes / size_of::<u32>(),
+                );
         }
     }
 
@@ -307,6 +319,7 @@ pub fn write_fmt(args: core::fmt::Arguments) {
 #[derive(Debug, Clone, Copy)]
 pub struct FramebufferInfo {
     pub base: usize,
+    pub size_bytes: usize,
     pub width: usize,
     pub height: usize,
     pub bpp: usize,
@@ -315,6 +328,7 @@ pub struct FramebufferInfo {
 pub fn init(fb_tag: FramebufferInfo) {
     let FramebufferInfo {
         base,
+        size_bytes,
         width,
         height,
         bpp,
@@ -323,6 +337,7 @@ pub fn init(fb_tag: FramebufferInfo) {
     let framebuf = FrameBuffer {
         back_buffer: alloc::vec![0u32; width * height].into_boxed_slice(),
         start_addr: VirtAddr::new_canonical(base),
+        size_bytes,
         width,
         height,
         bpp,
@@ -331,6 +346,12 @@ pub fn init(fb_tag: FramebufferInfo) {
         text_cursor_y: 0,
         text_fgcolor: Color::WHITE,
     };
+
+    log::debug!(
+        "fb: 0x{:016x} .. 0x{:016x}",
+        framebuf.start_addr,
+        framebuf.start_addr.add_bytes(framebuf.size_bytes())
+    );
 
     FRAMEBUFFER.call_once(|| IrqMutex::new(framebuf));
 

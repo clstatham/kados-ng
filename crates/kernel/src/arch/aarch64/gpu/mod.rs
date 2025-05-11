@@ -8,14 +8,25 @@ use thiserror::Error;
 use crate::{
     arch::ArchTrait,
     dtb::{Phandle, get_mmio_addr},
-    mem::paging::{
-        allocator::KernelFrameAllocator,
-        table::{BlockSize, PageFlags, PageTable, TableKind},
+    framebuffer::FramebufferInfo,
+    mem::{
+        paging::{
+            allocator::KernelFrameAllocator,
+            table::{PageFlags, PageTable, TableKind},
+        },
+        units::{FrameCount, PhysAddr},
     },
     syscall::errno::Errno,
 };
 
 use super::{AArch64, mmio::Mmio};
+use props::*;
+
+pub mod props;
+
+// from config.txt
+pub const FRAMEBUFFER_WIDTH: usize = 640;
+pub const FRAMEBUFFER_HEIGHT: usize = 480;
 
 bitflags! {
     pub struct MailboxStatus: u32 {
@@ -80,27 +91,8 @@ impl MailboxMessage {
 pub trait MailboxProperty: Sized {
     const TAG: u32;
     type Response: Sized;
-    fn encode_request(self, writer: MailboxRequest) -> MailboxRequest;
+    fn encode_request(self, request: MailboxRequest) -> MailboxRequest;
     fn decode_response(response: &[u32]) -> Option<Self::Response>;
-}
-
-pub struct GetFirmwareRevision;
-pub struct FirmwareRevisionResponse {
-    pub revision: u32,
-}
-
-impl MailboxProperty for GetFirmwareRevision {
-    const TAG: u32 = 0x00000001;
-    type Response = FirmwareRevisionResponse;
-
-    fn encode_request(self, request: MailboxRequest) -> MailboxRequest {
-        request.raw_prop(Self::TAG).raw_prop(8).raw_prop(0).skip(2)
-    }
-
-    fn decode_response(response: &[u32]) -> Option<Self::Response> {
-        let revision = response[0];
-        Some(FirmwareRevisionResponse { revision })
-    }
 }
 
 pub const MAX_PROPS: usize = AArch64::PAGE_SIZE / size_of::<u32>();
@@ -114,26 +106,6 @@ pub struct MailboxBuffer {
 impl MailboxBuffer {
     pub const SIZE_IDX: usize = 0;
     pub const CODE_IDX: usize = 1;
-
-    pub fn new_request() -> MailboxRequest {
-        let frame = unsafe { KernelFrameAllocator.allocate_one() }.unwrap();
-        log::debug!("frame: {}", frame);
-        let mut mapper = PageTable::current(TableKind::Kernel);
-        mapper
-            .map_to(
-                frame.as_identity_virt(),
-                frame,
-                BlockSize::Page4KiB,
-                PageFlags::new_device(),
-            )
-            .unwrap()
-            .flush();
-
-        MailboxRequest {
-            buf: frame.as_hhdm_virt().as_raw_ptr_mut(),
-            index: 2,
-        }
-    }
 
     pub fn buffer_size(&self) -> u32 {
         self.props[Self::SIZE_IDX] >> 2
@@ -151,11 +123,43 @@ pub struct MailboxRequest {
 }
 
 impl MailboxRequest {
-    pub fn prop(self, prop: impl MailboxProperty) -> Self {
-        prop.encode_request(self)
+    pub fn new() -> MailboxRequest {
+        let frame = unsafe {
+            KernelFrameAllocator.allocate(FrameCount::from_bytes(size_of::<MailboxBuffer>()))
+        }
+        .unwrap();
+        let mut mapper = PageTable::current(TableKind::Kernel);
+        mapper
+            .kernel_map_range(
+                frame.as_identity_virt(),
+                frame,
+                size_of::<MailboxBuffer>(),
+                PageFlags::new_device(),
+            )
+            .unwrap()
+            .flush();
+
+        MailboxRequest {
+            buf: frame.as_hhdm_virt().as_raw_ptr_mut(),
+            index: 2,
+        }
     }
 
-    pub fn raw_prop(mut self, prop: u32) -> Self {
+    pub fn encode<T: MailboxProperty>(self, prop: T) -> Self {
+        let mut this = self;
+        this = this.int(T::TAG);
+        let max_size = usize::max(size_of::<T>(), size_of::<T::Response>());
+        this = this.int(max_size as u32);
+        this = this.int(0); // request
+        let start = this.index as usize;
+        this = prop.encode_request(this);
+        while (this.index as usize) < start + (max_size >> 2) {
+            this = this.int(0); // add placeholders
+        }
+        this
+    }
+
+    pub fn int(mut self, prop: u32) -> Self {
         (unsafe { &mut *self.buf })[self.index as usize] = prop;
         self.index += 1;
         self
@@ -169,7 +173,7 @@ impl MailboxRequest {
     pub fn finish(self) -> *mut MailboxBuffer {
         unsafe {
             (&mut *self.buf)[MailboxBuffer::SIZE_IDX] = (self.index + 1) << 2; // add 1 for the zero-tag at the end
-            (&mut *self.buf)[MailboxBuffer::CODE_IDX] = 0; // request    
+            (&mut *self.buf)[MailboxBuffer::CODE_IDX] = 0; // request
             self.buf
         }
     }
@@ -185,14 +189,25 @@ impl MailboxResponse {
         let size = buf.buffer_size() as usize;
         let mut i = 2;
         while i < size {
+            let prop_size = (buf[i + 1] >> 2) as usize;
+
             if buf[i] == T::TAG {
-                return T::decode_response(&buf[i + 2..]);
+                return T::decode_response(&buf[i + 3..i + 3 + prop_size]);
             }
 
-            i += ((buf[i + 1] >> 2) + 3) as usize;
+            i += prop_size + 3;
         }
 
         None
+    }
+}
+
+impl Drop for MailboxResponse {
+    fn drop(&mut self) {
+        let addr = PhysAddr::new_canonical(self.buf as usize - crate::HHDM_PHYSICAL_OFFSET);
+        KernelFrameAllocator
+            .free(addr, FrameCount::from_bytes(size_of::<MailboxBuffer>()))
+            .unwrap();
     }
 }
 
@@ -268,10 +283,56 @@ impl Mailbox {
 
 pub fn init(fdt: &Fdt) {
     let mut mbox = Mailbox::parse(fdt).unwrap();
-    log::info!("mailbox @ {}", mbox.base.addr);
+    log::debug!("mailbox @ {}", mbox.base.addr);
 
-    let request = MailboxBuffer::new_request().prop(GetFirmwareRevision);
+    let request = MailboxRequest::new()
+        .encode(GetFirmwareRevision {})
+        .encode(AllocateBuffer {
+            align: AArch64::PAGE_SIZE as u32,
+        })
+        .encode(SetDepth { bpp: 32 })
+        .encode(SetPhysicalSize {
+            width: FRAMEBUFFER_WIDTH as u32,
+            height: FRAMEBUFFER_HEIGHT as u32,
+        })
+        .encode(SetVirtualSize {
+            width: FRAMEBUFFER_WIDTH as u32,
+            height: FRAMEBUFFER_HEIGHT as u32 * 2,
+        })
+        .encode(GetPitch {})
+        .encode(GetPhysicalSize {})
+        .encode(GetDepth {});
+
     let mut response = unsafe { mbox.call(request, MailboxChannel::TagsArmToVc).unwrap() };
     let rev = response.decode::<GetFirmwareRevision>().unwrap();
-    log::info!("firmware revision: {:#x}", rev.revision);
+    log::debug!("firmware revision: {:#x}", rev.revision);
+    let buffer = response.decode::<AllocateBuffer>().unwrap();
+    log::debug!(
+        "buffer: 0x{:016x} .. 0x{:016x}",
+        buffer.base_addr,
+        buffer.base_addr + buffer.size
+    );
+    let phys_size = response.decode::<GetPhysicalSize>().unwrap();
+    log::debug!("physical size = {}x{}", phys_size.width, phys_size.height);
+    let pitch = response.decode::<GetPitch>().unwrap();
+    log::debug!("pitch = {}", pitch.pitch);
+    let depth = response.decode::<GetDepth>().unwrap();
+    log::debug!("depth = {}", depth.depth);
+
+    // map it
+    let mut mapper = PageTable::current(TableKind::Kernel);
+    let frame = PhysAddr::new_canonical(buffer.base_addr as usize);
+    let page = frame.as_hhdm_virt();
+    mapper
+        .kernel_map_range(page, frame, buffer.size as usize, PageFlags::new_device())
+        .unwrap()
+        .flush();
+
+    crate::framebuffer::init(FramebufferInfo {
+        base: page.value(),
+        size_bytes: buffer.size as usize,
+        width: phys_size.width as usize,
+        height: phys_size.height as usize,
+        bpp: depth.depth as usize,
+    });
 }
