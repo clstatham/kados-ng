@@ -1,4 +1,4 @@
-use core::arch::{asm, global_asm};
+use core::arch::{asm, global_asm, naked_asm};
 
 use fdt::Fdt;
 
@@ -33,7 +33,7 @@ pub struct Table([usize; 512]);
 
 #[unsafe(no_mangle)]
 #[unsafe(link_section = ".boot")]
-pub unsafe extern "C" fn mmu_init_el2(dtb_ptr: *const u8, _zero: usize) -> ! {
+pub unsafe extern "C" fn mmu_init_el2(dtb_ptr: *const u8) -> ! {
     unsafe {
         if core_affinity() != 0 {
             loop {
@@ -239,13 +239,29 @@ extern "C" fn boot_higher_half(dtb_ptr: *const u8) -> ! {
 #[unsafe(link_section = ".boot")]
 pub fn alloc_table(off: &mut usize) -> &'static mut Table {
     let table = unsafe { &mut *(*off as *mut Table) };
-    let mut i = 0;
-    while i < 512 {
-        table.0[i] = 0;
-        i += 1;
+    unsafe {
+        memset(*off as *mut u8, size_of::<Table>(), 0);
     }
     *off += size_of::<Table>();
     table
+}
+
+#[unsafe(link_section = ".boot")]
+#[allow(unused)]
+pub unsafe fn memset(mut ptr: *mut u8, mut size: usize, value: u8) {
+    unsafe {
+        asm!(
+            "
+        1:
+            strb {value:w}, [{ptr}], #1
+            subs {size}, {size}, #1
+            bne 1b
+        ",
+            ptr = inout(reg) ptr,
+            size = inout(reg) size,
+            value = in(reg) value as u32,
+        )
+    }
 }
 
 #[unsafe(link_section = ".boot")]

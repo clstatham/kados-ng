@@ -220,6 +220,37 @@ impl PageTable {
         unsafe { Ok(p1.entry(addr.page_table_index(PageTableLevel::Level1))) }
     }
 
+    pub fn with_frame_mut<R>(
+        &mut self,
+        addr: VirtAddr,
+        f: impl FnOnce(&mut PageTableEntry),
+    ) -> Result<PageFlush, MemError> {
+        let p3 = self.next_table(addr.page_table_index(PageTableLevel::Level4))?;
+        let p2 = p3.next_table(addr.page_table_index(PageTableLevel::Level3))?;
+        let mut p1 = p2.next_table(addr.page_table_index(PageTableLevel::Level2))?;
+        let mut entry = unsafe { p1.entry(addr.page_table_index(PageTableLevel::Level1)) };
+        f(&mut entry);
+        unsafe {
+            p1.set_entry(addr.page_table_index(PageTableLevel::Level1), entry);
+        }
+        Ok(PageFlush::new(addr))
+    }
+
+    pub fn remap_to(
+        &mut self,
+        page: VirtAddr,
+        frame: PhysAddr,
+        block_size: BlockSize,
+        flags: PageFlags,
+    ) -> Result<PageFlush, MemError> {
+        let insert_flags = PageFlags::new_table();
+        match block_size {
+            BlockSize::Block1GiB => self.map_to_1gib(page, frame, flags, insert_flags, true),
+            BlockSize::Block2MiB => self.map_to_2mib(page, frame, flags, insert_flags, true),
+            BlockSize::Page4KiB => self.map_to_4kib(page, frame, flags, insert_flags, true),
+        }
+    }
+
     pub fn map_to(
         &mut self,
         page: VirtAddr,
@@ -229,9 +260,9 @@ impl PageTable {
     ) -> Result<PageFlush, MemError> {
         let insert_flags = PageFlags::new_table();
         match block_size {
-            BlockSize::Block1GiB => self.map_to_1gib(page, frame, flags, insert_flags),
-            BlockSize::Block2MiB => self.map_to_2mib(page, frame, flags, insert_flags),
-            BlockSize::Page4KiB => self.map_to_4kib(page, frame, flags, insert_flags),
+            BlockSize::Block1GiB => self.map_to_1gib(page, frame, flags, insert_flags, false),
+            BlockSize::Block2MiB => self.map_to_2mib(page, frame, flags, insert_flags, false),
+            BlockSize::Page4KiB => self.map_to_4kib(page, frame, flags, insert_flags, false),
         }
     }
 
@@ -254,12 +285,32 @@ impl PageTable {
         Ok(PageFlushAll)
     }
 
+    pub fn kernel_remap_range(
+        &mut self,
+        mut page: VirtAddr,
+        mut frame: PhysAddr,
+        mut size: usize,
+        flags: PageFlags,
+    ) -> Result<PageFlushAll, MemError> {
+        while size != 0 {
+            let block_size = BlockSize::largest_aligned(page, frame, size);
+            let flush = self.remap_to(page, frame, block_size, flags)?;
+            unsafe { flush.ignore() };
+
+            page = page.add_bytes(block_size.size());
+            frame = frame.add_bytes(block_size.size());
+            size -= block_size.size();
+        }
+        Ok(PageFlushAll)
+    }
+
     fn map_to_1gib(
         &mut self,
         page: VirtAddr,
         frame: PhysAddr,
         flags: PageFlags,
         insert_flags: PageFlags,
+        remap: bool,
     ) -> Result<PageFlush, MemError> {
         #[cfg(target_arch = "aarch64")]
         let flags = flags.with_flag(Arch::PAGE_FLAG_NON_BLOCK, false); // unset the "table" bit to make it a "block"
@@ -268,7 +319,7 @@ impl PageTable {
             self.next_table_create(page.page_table_index(PageTableLevel::Level4), insert_flags)?;
         let idx = page.page_table_index(PageTableLevel::Level3);
         let entry = unsafe { p3.entry(idx) };
-        if entry.is_unused() {
+        if entry.is_unused() || remap {
             unsafe {
                 p3.set_entry(
                     idx,
@@ -287,6 +338,7 @@ impl PageTable {
         frame: PhysAddr,
         flags: PageFlags,
         insert_flags: PageFlags,
+        remap: bool,
     ) -> Result<PageFlush, MemError> {
         #[cfg(target_arch = "aarch64")]
         let flags = flags.with_flag(Arch::PAGE_FLAG_NON_BLOCK, false); // unset the "table" bit to make it a "block"
@@ -298,7 +350,7 @@ impl PageTable {
         let idx = page.page_table_index(PageTableLevel::Level2);
         let entry = unsafe { p2.entry(idx) };
 
-        if entry.is_unused() {
+        if entry.is_unused() || remap {
             unsafe {
                 p2.set_entry(
                     idx,
@@ -317,6 +369,7 @@ impl PageTable {
         frame: PhysAddr,
         flags: PageFlags,
         insert_flags: PageFlags,
+        remap: bool,
     ) -> Result<PageFlush, MemError> {
         let mut p3 =
             self.next_table_create(page.page_table_index(PageTableLevel::Level4), insert_flags)?;
@@ -327,7 +380,7 @@ impl PageTable {
         let idx = page.page_table_index(PageTableLevel::Level1);
         let entry = unsafe { p1.entry(idx) };
 
-        if entry.is_unused() {
+        if entry.is_unused() || remap {
             unsafe { p1.set_entry(idx, PageTableEntry::new(frame, flags)) };
         } else {
             return Err(MemError::PageAlreadyMapped(page, entry));

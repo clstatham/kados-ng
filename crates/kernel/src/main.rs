@@ -121,6 +121,10 @@ pub(crate) fn kernel_main() -> ! {
     log::info!("initializing frame allocator (post-heap)...");
     kernel_frame_allocator().convert_post_heap().unwrap();
 
+    log::info!("initializing device tree...");
+    let fdt = boot_info.fdt.as_ref().unwrap();
+    dtb::init(fdt);
+
     log::info!("running init hooks (post-heap)...");
     unsafe {
         Arch::init_post_heap();
@@ -130,10 +134,6 @@ pub(crate) fn kernel_main() -> ! {
     unsafe {
         Arch::init_cpu_local_block();
     }
-
-    log::info!("initializing device tree...");
-    let fdt = boot_info.fdt.as_ref().unwrap();
-    dtb::init(fdt);
 
     log::info!("initializing timer...");
     arch::time::init(fdt);

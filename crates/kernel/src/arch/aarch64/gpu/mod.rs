@@ -1,4 +1,4 @@
-use core::arch::asm;
+use core::{arch::asm, fmt::Debug};
 
 use bitflags::bitflags;
 use derive_more::{Deref, DerefMut, TryFrom};
@@ -6,7 +6,7 @@ use fdt::Fdt;
 use thiserror::Error;
 
 use crate::{
-    arch::ArchTrait,
+    arch::{ArchTrait, clean_data_cache, invalidate_data_cache},
     dtb::{Phandle, get_mmio_addr},
     framebuffer::FramebufferInfo,
     mem::{
@@ -14,19 +14,19 @@ use crate::{
             allocator::KernelFrameAllocator,
             table::{PageFlags, PageTable, TableKind},
         },
-        units::{FrameCount, PhysAddr},
+        units::{FrameCount, PhysAddr, VirtAddr},
     },
     syscall::errno::Errno,
 };
 
-use super::{AArch64, mmio::Mmio};
+use super::AArch64;
 use props::*;
 
 pub mod props;
 
 // from config.txt
-pub const FRAMEBUFFER_WIDTH: usize = 640;
-pub const FRAMEBUFFER_HEIGHT: usize = 480;
+pub const FRAMEBUFFER_WIDTH: usize = 1280;
+pub const FRAMEBUFFER_HEIGHT: usize = 720;
 
 bitflags! {
     pub struct MailboxStatus: u32 {
@@ -60,9 +60,7 @@ pub struct MailboxMessage(u32);
 
 impl MailboxMessage {
     pub fn encode(buffer: *mut MailboxBuffer, channel: MailboxChannel) -> Self {
-        let addr: u32 = (buffer as usize - crate::HHDM_PHYSICAL_OFFSET)
-            .try_into()
-            .unwrap_or_else(|_| panic!("{} >= u32::MAX", buffer as usize));
+        let addr: u32 = (buffer as usize - crate::HHDM_PHYSICAL_OFFSET) as u32;
         assert_eq!(addr & 0b1111, 0, "buffer is not aligned to 16 bytes");
         Self(addr | (channel as u32))
     }
@@ -72,7 +70,7 @@ impl MailboxMessage {
     }
 
     pub fn decode(self) -> *const MailboxBuffer {
-        (self.payload() as usize + crate::HHDM_PHYSICAL_OFFSET) as *const MailboxBuffer
+        ((self.payload() as usize) + crate::HHDM_PHYSICAL_OFFSET) as *const MailboxBuffer
     }
 
     pub fn channel(&self) -> MailboxChannel {
@@ -85,6 +83,17 @@ impl MailboxMessage {
 
     pub fn raw(&self) -> u32 {
         self.0
+    }
+}
+
+impl Debug for MailboxMessage {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(
+            f,
+            "MailboxMessage {{ payload: 0x{:016x}, channel: {:?} }}",
+            self.payload(),
+            self.channel()
+        )
     }
 }
 
@@ -174,7 +183,8 @@ impl MailboxRequest {
         unsafe {
             (&mut *self.buf)[MailboxBuffer::SIZE_IDX] = (self.index + 1) << 2; // add 1 for the zero-tag at the end
             (&mut *self.buf)[MailboxBuffer::CODE_IDX] = 0; // request
-            self.buf
+            let this = self.int(0); // end tag
+            this.buf
         }
     }
 }
@@ -204,7 +214,7 @@ impl MailboxResponse {
 
 impl Drop for MailboxResponse {
     fn drop(&mut self) {
-        let addr = PhysAddr::new_canonical(self.buf as usize - crate::HHDM_PHYSICAL_OFFSET);
+        let addr = VirtAddr::new_canonical(self.buf as usize).as_hhdm_phys();
         KernelFrameAllocator
             .free(addr, FrameCount::from_bytes(size_of::<MailboxBuffer>()))
             .unwrap();
@@ -214,7 +224,7 @@ impl Drop for MailboxResponse {
 #[derive(Debug)]
 pub struct Mailbox {
     pub phandle: Phandle,
-    pub base: Mmio<u32>,
+    pub base: VirtAddr,
 }
 
 impl Mailbox {
@@ -232,12 +242,14 @@ impl Mailbox {
 
         Ok(Self {
             phandle: Phandle(phandle),
-            base: Mmio::new(mmio_addr.as_hhdm_virt()),
+            base: mmio_addr.as_hhdm_virt(),
         })
     }
 
     pub fn status(&self) -> MailboxStatus {
-        MailboxStatus::from_bits_truncate(unsafe { self.base.read(Self::STATUS) })
+        MailboxStatus::from_bits_truncate(unsafe {
+            self.base.add_bytes(Self::STATUS).read_volatile().unwrap()
+        })
     }
 
     pub unsafe fn call(
@@ -248,28 +260,42 @@ impl Mailbox {
         let buf = request.finish();
         let message = MailboxMessage::encode(buf, channel);
 
+        unsafe {
+            asm!("dsb ishst");
+            clean_data_cache(buf.cast(), (*buf).buffer_size() as usize * size_of::<u32>());
+            asm!("dsb ish; isb");
+        }
+
         // send it along
         while self.status().contains(MailboxStatus::MAILBOX_FULL) {
             core::hint::spin_loop();
         }
-        unsafe { self.base.write(Self::WRITE, message.raw()) };
+        unsafe {
+            self.base
+                .add_bytes(Self::WRITE)
+                .write_volatile(message.raw())
+                .unwrap()
+        };
 
         // wait for response
         let resp = loop {
             while self.status().contains(MailboxStatus::MAILBOX_EMPTY) {
                 core::hint::spin_loop();
             }
-            let resp = unsafe { self.base.read(Self::READ) };
+            let resp = unsafe { self.base.add_bytes(Self::READ).read_volatile().unwrap() };
             let resp = MailboxMessage::from_raw(resp);
-            if resp.channel() == channel && resp.payload() == message.payload() {
+            if resp.channel() == message.channel() && resp.payload() == message.payload() {
                 break resp;
             }
         };
 
-        unsafe { asm!("dsb sy; isb") }
-
         let buf = resp.decode();
-        assert!(!buf.is_null());
+
+        unsafe {
+            asm!("dsb ish; isb");
+            invalidate_data_cache(buf.cast(), (*buf).buffer_size() as usize * size_of::<u32>());
+        }
+
         let code = unsafe { (*buf).request_code() };
         let response = MailboxResponse { buf };
 
@@ -283,7 +309,7 @@ impl Mailbox {
 
 pub fn init(fdt: &Fdt) {
     let mut mbox = Mailbox::parse(fdt).unwrap();
-    log::debug!("mailbox @ {}", mbox.base.addr);
+    log::debug!("mailbox @ {}", mbox.base);
 
     let request = MailboxRequest::new()
         .encode(GetFirmwareRevision {})
@@ -296,9 +322,7 @@ pub fn init(fdt: &Fdt) {
             height: FRAMEBUFFER_HEIGHT as u32,
         })
         .encode(SetDepth { bpp: 32 })
-        .encode(AllocateBuffer {
-            align: AArch64::PAGE_SIZE as u32,
-        })
+        .encode(AllocateBuffer { align: 0 })
         .encode(GetPitch {})
         .encode(GetPhysicalSize {})
         .encode(GetDepth {});
@@ -307,10 +331,11 @@ pub fn init(fdt: &Fdt) {
     let rev = response.decode::<GetFirmwareRevision>().unwrap();
     log::debug!("firmware revision: {:#x}", rev.revision);
     let buffer = response.decode::<AllocateBuffer>().unwrap();
+    let base_addr = buffer.bus_addr & 0x3FFF_FFFF;
     log::debug!(
         "buffer: 0x{:016x} .. 0x{:016x}",
-        buffer.base_addr,
-        buffer.base_addr + buffer.size
+        base_addr,
+        base_addr + buffer.size
     );
     let phys_size = response.decode::<GetPhysicalSize>().unwrap();
     log::debug!("physical size = {}x{}", phys_size.width, phys_size.height);
@@ -321,15 +346,20 @@ pub fn init(fdt: &Fdt) {
 
     // map it
     let mut mapper = PageTable::current(TableKind::Kernel);
-    let frame = PhysAddr::new_canonical(buffer.base_addr as usize);
+    let frame = PhysAddr::new_canonical(base_addr as usize);
     let page = frame.as_hhdm_virt();
-    mapper
-        .kernel_map_range(page, frame, buffer.size as usize, PageFlags::new_device())
-        .unwrap()
-        .flush();
+    let flush = mapper
+        .kernel_map_range(
+            page,
+            frame,
+            buffer.size as usize,
+            PageFlags::new().writable(),
+        )
+        .unwrap();
+    flush.flush();
 
     crate::framebuffer::init(FramebufferInfo {
-        base: page.value(),
+        base: page,
         size_bytes: buffer.size as usize,
         width: phys_size.width as usize,
         height: phys_size.height as usize,

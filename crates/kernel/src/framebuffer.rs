@@ -8,14 +8,14 @@ use embedded_graphics::{
 };
 use spin::Once;
 
-pub use embedded_graphics::pixelcolor::Bgr888 as Color;
+pub use embedded_graphics::pixelcolor::Rgb888 as Color;
 
 use crate::{
     mem::units::VirtAddr,
     sync::{IrqMutex, IrqMutexGuard},
 };
 
-const FONT: MonoFont = ascii::FONT_8X13;
+const FONT: MonoFont = ascii::FONT_10X20;
 
 pub const TEXT_BUFFER_WIDTH: usize = 80;
 pub const TEXT_BUFFER_HEIGHT: usize = 25;
@@ -50,7 +50,6 @@ impl FbChar {
 }
 
 pub struct FrameBuffer {
-    back_buffer: Box<[u32]>,
     start_addr: VirtAddr,
     size_bytes: usize,
     width: usize,
@@ -108,14 +107,11 @@ impl FrameBuffer {
     }
 
     pub fn frame_mut(&mut self) -> &mut [u32] {
-        &mut self.back_buffer
-    }
-
-    pub fn present(&mut self) {
         unsafe {
-            self.start_addr
-                .as_raw_ptr_mut::<u8>()
-                .copy_from_nonoverlapping(self.back_buffer.as_ptr().cast(), self.size_bytes);
+            core::slice::from_raw_parts_mut(
+                self.start_addr.as_raw_ptr_mut(),
+                self.size_bytes() / size_of::<u32>(),
+            )
         }
     }
 
@@ -140,6 +136,11 @@ impl FrameBuffer {
             }
         }
         self.cursor_color_hook();
+    }
+
+    pub fn set_pixel_raw(&mut self, x: usize, y: usize, color: u32) {
+        let width = self.width;
+        self.frame_mut()[y * width + x] = color;
     }
 
     fn cursor_color_hook(&mut self) {}
@@ -260,7 +261,7 @@ impl DrawTarget for FrameBuffer {
             let (x, y) = coord.into();
             if (0..self.width as i32).contains(&x) && (0..self.height as i32).contains(&y) {
                 let index: usize = x as usize + y as usize * self.width;
-                self.back_buffer[index] = color.into_storage();
+                self.frame_mut()[index] = color.into_storage();
             }
         }
 
@@ -268,7 +269,7 @@ impl DrawTarget for FrameBuffer {
     }
 
     fn clear(&mut self, color: Self::Color) -> Result<(), Self::Error> {
-        self.back_buffer.fill(color.into_storage());
+        self.frame_mut().fill(color.into_storage());
         Ok(())
     }
 }
@@ -288,7 +289,6 @@ pub fn fb<'a>() -> IrqMutexGuard<'a, FrameBuffer> {
 pub fn render_text_buf() {
     fb().clear_pixels();
     fb().render_text_buf();
-    fb().present();
 }
 
 #[macro_export]
@@ -315,7 +315,7 @@ pub fn write_fmt(args: core::fmt::Arguments) {
 
 #[derive(Debug, Clone, Copy)]
 pub struct FramebufferInfo {
-    pub base: usize,
+    pub base: VirtAddr,
     pub size_bytes: usize,
     pub width: usize,
     pub height: usize,
@@ -332,8 +332,7 @@ pub fn init(fb_tag: FramebufferInfo) {
     } = fb_tag;
 
     let framebuf = FrameBuffer {
-        back_buffer: alloc::vec![0u32; width * height].into_boxed_slice(),
-        start_addr: VirtAddr::new_canonical(base),
+        start_addr: base,
         size_bytes,
         width,
         height,

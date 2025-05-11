@@ -37,7 +37,7 @@ impl AArch64 {
 
     pub const PAGE_FLAG_DEVICE: usize =
         Self::PAGE_FLAG_PRESENT      
-            | Self::PAGE_FLAG_NON_BLOCK   
+            | Self::PAGE_FLAG_NON_BLOCK
             | Self::PAGE_FLAG_ACCESS 
             | (0 << 2) // AttrIdx 0
             | (0 << 6) // AP (RW, priv)
@@ -277,4 +277,23 @@ impl ArchTrait for AArch64 {
             }
         }
     }
+}
+
+
+pub unsafe fn clean_data_cache(addr: *const u8, len: usize) {
+    let start = addr as usize & !63;
+    let end = (addr as usize + len + 63) & !63;
+    for line in (start..end).step_by(64) {
+        unsafe { asm!("dc cvac, {}", in(reg) line) }
+    }
+    unsafe { asm!("dsb ish") }
+}
+
+pub unsafe fn invalidate_data_cache(addr: *const u8, len: usize) {
+    let start = addr as usize & !63;
+    let end = (addr as usize + len + 63) & !63;
+    for line in (start..end).step_by(64) {
+        unsafe { asm!("dc ivac, {}", in(reg) line) }
+    }
+    unsafe { asm!("dsb ish; isb") }
 }

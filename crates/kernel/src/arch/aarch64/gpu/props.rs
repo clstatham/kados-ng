@@ -59,7 +59,7 @@ prop!(0x40001 {
         pub align,
     }
     pub response AllocateBufferResponse {
-        pub base_addr,
+        pub bus_addr,
         pub size,
     }
 });
