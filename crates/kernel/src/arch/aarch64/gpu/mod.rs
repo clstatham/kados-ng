@@ -287,17 +287,17 @@ pub fn init(fdt: &Fdt) {
 
     let request = MailboxRequest::new()
         .encode(GetFirmwareRevision {})
-        .encode(AllocateBuffer {
-            align: AArch64::PAGE_SIZE as u32,
-        })
-        .encode(SetDepth { bpp: 32 })
         .encode(SetPhysicalSize {
             width: FRAMEBUFFER_WIDTH as u32,
             height: FRAMEBUFFER_HEIGHT as u32,
         })
         .encode(SetVirtualSize {
             width: FRAMEBUFFER_WIDTH as u32,
-            height: FRAMEBUFFER_HEIGHT as u32 * 2,
+            height: FRAMEBUFFER_HEIGHT as u32,
+        })
+        .encode(SetDepth { bpp: 32 })
+        .encode(AllocateBuffer {
+            align: AArch64::PAGE_SIZE as u32,
         })
         .encode(GetPitch {})
         .encode(GetPhysicalSize {})
