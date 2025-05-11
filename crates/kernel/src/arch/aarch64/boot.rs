@@ -1,4 +1,4 @@
-use core::arch::{asm, global_asm, naked_asm};
+use core::arch::{asm, global_asm};
 
 use fdt::Fdt;
 
@@ -259,7 +259,7 @@ pub unsafe fn memset(mut ptr: *mut u8, mut size: usize, value: u8) {
         ",
             ptr = inout(reg) ptr,
             size = inout(reg) size,
-            value = in(reg) value as u32,
+            value = in(reg) value,
         )
     }
 }

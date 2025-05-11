@@ -321,6 +321,7 @@ pub fn init(fdt: &Fdt) {
             width: FRAMEBUFFER_WIDTH as u32,
             height: FRAMEBUFFER_HEIGHT as u32,
         })
+        .encode(SetPixelOrder { order: 0x0 }) // BGR
         .encode(SetDepth { bpp: 32 })
         .encode(AllocateBuffer { align: 0 })
         .encode(GetPitch {})

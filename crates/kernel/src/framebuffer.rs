@@ -11,6 +11,7 @@ use spin::Once;
 pub use embedded_graphics::pixelcolor::Rgb888 as Color;
 
 use crate::{
+    arch::clean_data_cache,
     mem::units::VirtAddr,
     sync::{IrqMutex, IrqMutexGuard},
 };
@@ -140,7 +141,12 @@ impl FrameBuffer {
 
     pub fn set_pixel_raw(&mut self, x: usize, y: usize, color: u32) {
         let width = self.width;
-        self.frame_mut()[y * width + x] = color;
+        unsafe {
+            let ptr = self.frame_mut().as_mut_ptr().add(x + y * width);
+            ptr.write_volatile(color);
+
+            clean_data_cache(ptr.cast(), size_of::<u32>());
+        }
     }
 
     fn cursor_color_hook(&mut self) {}
@@ -260,8 +266,7 @@ impl DrawTarget for FrameBuffer {
         for Pixel(coord, color) in pixels.into_iter() {
             let (x, y) = coord.into();
             if (0..self.width as i32).contains(&x) && (0..self.height as i32).contains(&y) {
-                let index: usize = x as usize + y as usize * self.width;
-                self.frame_mut()[index] = color.into_storage();
+                self.set_pixel_raw(x as usize, y as usize, color.into_storage());
             }
         }
 
@@ -270,6 +275,8 @@ impl DrawTarget for FrameBuffer {
 
     fn clear(&mut self, color: Self::Color) -> Result<(), Self::Error> {
         self.frame_mut().fill(color.into_storage());
+        let ptr = self.start_addr.as_raw_ptr_mut();
+        unsafe { clean_data_cache(ptr, self.size_bytes) };
         Ok(())
     }
 }

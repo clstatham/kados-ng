@@ -116,3 +116,12 @@ prop!(0x40005 {
         pub depth,
     }
 });
+
+prop!(0x48006 {
+    pub request SetPixelOrder {
+        pub order,
+    }
+    pub response SetPixelOrderResponse {
+        pub order,
+    }
+});
