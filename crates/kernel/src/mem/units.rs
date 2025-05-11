@@ -315,7 +315,7 @@ impl FrameCount {
     }
 
     pub const fn from_bytes(bytes: usize) -> Self {
-        Self(bytes / Arch::PAGE_SIZE)
+        Self(bytes.div_ceil(Arch::PAGE_SIZE))
     }
 
     pub const fn frame_count(self) -> usize {

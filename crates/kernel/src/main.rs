@@ -29,6 +29,8 @@ pub mod syscall;
 pub mod task;
 pub mod time;
 #[macro_use]
+pub mod util;
+#[macro_use]
 pub mod framebuffer;
 pub mod mem;
 pub mod panicking;
@@ -116,6 +118,9 @@ pub(crate) fn kernel_main() -> ! {
         mem::heap::init_heap();
     }
 
+    log::info!("initializing frame allocator (post-heap)...");
+    kernel_frame_allocator().convert_post_heap().unwrap();
+
     log::info!("running init hooks (post-heap)...");
     unsafe {
         Arch::init_post_heap();
@@ -125,9 +130,6 @@ pub(crate) fn kernel_main() -> ! {
     unsafe {
         Arch::init_cpu_local_block();
     }
-
-    log::info!("initializing frame allocator (post-heap)...");
-    kernel_frame_allocator().convert_post_heap().unwrap();
 
     log::info!("initializing device tree...");
     let fdt = boot_info.fdt.as_ref().unwrap();

@@ -11,11 +11,12 @@ use crate::{
             table::{BlockSize, PageFlags, PageTable, TableKind},
         },
         units::{PhysAddr, VirtAddr},
-    }
+    }, BOOT_INFO
 };
 
 use super::ArchTrait;
 
+pub mod gpu;
 pub mod gic;
 pub mod boot;
 pub mod serial;
@@ -99,7 +100,12 @@ impl ArchTrait for AArch64 {
 
     }
 
-    unsafe fn init_post_heap() {}
+    unsafe fn init_post_heap() {
+        let boot_info = BOOT_INFO.get().unwrap();
+        let fdt = boot_info.fdt.as_ref().unwrap();
+
+        gpu::init(fdt);
+    }
 
     unsafe fn init_interrupts() {}
 

@@ -20,6 +20,18 @@ pub unsafe fn irq_chip<'a>() -> &'a mut IrqChip {
 }
 
 pub fn init(fdt: &Fdt) {
+    // for node in fdt.all_nodes() {
+    //     println!(
+    //         "{}: {}",
+    //         node.name,
+    //         node.compatible().map(|c| c.first()).unwrap_or_default()
+    //     );
+
+    //     for prop in node.properties() {
+    //         println!("    {}", prop.name);
+    //     }
+    // }
+
     #[allow(static_mut_refs)]
     unsafe {
         IRQ_CHIP.call_once(|| IrqChip::new(fdt))
