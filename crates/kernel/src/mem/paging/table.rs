@@ -171,7 +171,6 @@ impl PageTable {
                 .frame
                 .add_bytes(index * size_of::<PageTableEntry>())
                 .as_hhdm_virt();
-
             addr.write_volatile(entry).unwrap();
         }
     }
@@ -275,6 +274,25 @@ impl PageTable {
     ) -> Result<PageFlushAll, MemError> {
         while size != 0 {
             let block_size = BlockSize::largest_aligned(page, frame, size);
+            let flush = self.map_to(page, frame, block_size, flags)?;
+            unsafe { flush.ignore() };
+
+            page = page.add_bytes(block_size.size());
+            frame = frame.add_bytes(block_size.size());
+            size -= block_size.size();
+        }
+        Ok(PageFlushAll)
+    }
+
+    pub fn map_range_with_block_size(
+        &mut self,
+        mut page: VirtAddr,
+        mut frame: PhysAddr,
+        mut size: usize,
+        block_size: BlockSize,
+        flags: PageFlags,
+    ) -> Result<PageFlushAll, MemError> {
+        while size != 0 {
             let flush = self.map_to(page, frame, block_size, flags)?;
             unsafe { flush.ignore() };
 

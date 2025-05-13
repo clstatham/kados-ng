@@ -16,7 +16,7 @@ use crate::{
 
 use super::ArchTrait;
 
-pub mod gpu;
+pub mod drivers;
 pub mod gic;
 pub mod boot;
 pub mod serial;
@@ -24,7 +24,6 @@ pub mod syscall;
 pub mod task;
 pub mod time;
 pub mod vectors;
-pub mod mmio;
 
 pub struct AArch64;
 
@@ -98,13 +97,15 @@ impl ArchTrait for AArch64 {
             }
         };
 
+        drivers::dma_init(mapper);
     }
 
-    unsafe fn init_post_heap() {
+    unsafe fn init_drivers() {
         let boot_info = BOOT_INFO.get().unwrap();
         let fdt = boot_info.fdt.as_ref().unwrap();
 
-        gpu::init(fdt);
+        drivers::gpu::init(fdt);
+        drivers::usb::init(fdt);
     }
 
     unsafe fn init_interrupts() {}
@@ -156,10 +157,12 @@ impl ArchTrait for AArch64 {
     #[inline(always)]
     unsafe fn invalidate_all() {
         unsafe {
-            asm!("dsb ishst");
-            asm!("tlbi vmalle1is");
-            asm!("dsb ish");
-            asm!("isb");
+            asm!(
+                "dsb ishst",
+                "tlbi vmalle1is",
+                "dsb ish",
+                "isb"
+                )
         }
     }
 
@@ -269,13 +272,8 @@ impl ArchTrait for AArch64 {
         unsafe { asm!("wfe") }
     }
 
-    fn hcf() -> ! {
-        loop {
-            unsafe {
-                asm!("wfe");
-                asm!("nop");
-            }
-        }
+    fn nop() {
+        unsafe { asm!("nop") }
     }
 }
 

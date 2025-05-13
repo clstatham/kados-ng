@@ -2,7 +2,7 @@ use core::{
     arch::asm,
     fmt::{Binary, Debug, LowerHex, UpperHex},
     marker::PhantomData,
-    ops::{BitAndAssign, BitOrAssign, Not},
+    ops::{BitAnd, BitAndAssign, BitOr, BitOrAssign, Not},
 };
 
 use crate::mem::units::VirtAddr;
@@ -21,24 +21,26 @@ pub trait MmioValue:
     + BitAndAssign
     + BitOrAssign
     + Not<Output = Self>
+    + BitAnd<Output = Self>
+    + BitOr<Output = Self>
 {
+    const ZERO: Self;
 }
 
-impl<T> MmioValue for T where
-    T: 'static
-        + Copy
-        + Debug
-        + Binary
-        + LowerHex
-        + UpperHex
-        + PartialEq
-        + Eq
-        + PartialOrd
-        + Ord
-        + BitAndAssign
-        + BitOrAssign
-        + Not<Output = T>
-{
+impl MmioValue for u8 {
+    const ZERO: Self = 0;
+}
+
+impl MmioValue for u16 {
+    const ZERO: Self = 0;
+}
+
+impl MmioValue for u32 {
+    const ZERO: Self = 0;
+}
+
+impl MmioValue for u64 {
+    const ZERO: Self = 0;
 }
 
 #[derive(Debug, Default)]
@@ -58,7 +60,7 @@ impl<T: MmioValue> Mmio<T> {
     #[inline(always)]
     pub unsafe fn read(&self, offset: usize) -> T {
         unsafe {
-            asm!("dsb sy; isb");
+            asm!("dsb sy", "isb");
             self.addr.add_bytes(offset).read_volatile().unwrap()
         }
     }
@@ -67,19 +69,7 @@ impl<T: MmioValue> Mmio<T> {
     pub unsafe fn write(&mut self, offset: usize, value: T) {
         unsafe {
             self.addr.add_bytes(offset).write_volatile(value).unwrap();
-            asm!("dsb sy; isb");
-            log::trace!(
-                "wrote {:#x} with 0b{:032b}",
-                self.addr.value() + offset,
-                value
-            );
-            let read_value = self.read(offset);
-            let matches = if value == read_value {
-                "MATCH"
-            } else {
-                "MISMATCH"
-            };
-            log::trace!("    (read back 0b{:032b}) ({})", read_value, matches);
+            asm!("dsb sy", "isb");
         }
     }
 
@@ -128,5 +118,25 @@ impl<T: MmioValue> Mmio<T> {
             value &= !bits;
             self.write_assert(offset, value);
         }
+    }
+
+    #[inline(always)]
+    pub unsafe fn spin_until_hi(&self, offset: usize, mask: T) {
+        crate::util::spin_while(|| unsafe { self.read(offset) & mask != mask });
+    }
+
+    #[inline(always)]
+    pub unsafe fn spin_while_hi(&self, offset: usize, mask: T) {
+        crate::util::spin_while(|| unsafe { self.read(offset) & mask == mask });
+    }
+
+    #[inline(always)]
+    pub unsafe fn spin_until_lo(&self, offset: usize, mask: T) {
+        crate::util::spin_while(|| unsafe { self.read(offset) & mask != T::ZERO });
+    }
+
+    #[inline(always)]
+    pub unsafe fn spin_while_lo(&self, offset: usize, mask: T) {
+        crate::util::spin_while(|| unsafe { self.read(offset) & mask == T::ZERO });
     }
 }

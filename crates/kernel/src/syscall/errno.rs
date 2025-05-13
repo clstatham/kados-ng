@@ -267,13 +267,24 @@ pub enum Errno {
     EHWPOISON = 133,
 }
 
-impl Errno {
-    pub fn result_to_isize(res: core::result::Result<isize, Errno>) -> isize {
-        match res {
+pub trait ErrnoResult: Sized {
+    fn to_isize(self) -> isize;
+}
+
+impl ErrnoResult for core::result::Result<isize, Errno> {
+    fn to_isize(self) -> isize {
+        match self {
             Ok(retval) => retval,
-            Err(e) => -(e as i32 as isize),
+            Err(e) => -(e as isize),
         }
     }
 }
 
-pub type Result<T> = core::result::Result<T, Errno>;
+impl ErrnoResult for core::result::Result<(), Errno> {
+    fn to_isize(self) -> isize {
+        match self {
+            Ok(()) => 0,
+            Err(e) => -(e as isize),
+        }
+    }
+}

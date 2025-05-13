@@ -125,3 +125,35 @@ prop!(0x48006 {
         pub order,
     }
 });
+
+prop!(0x38001 {
+    pub request SetClockState {
+        pub clock_id,
+        pub state,
+    }
+    pub response SetClockStateResponse {
+        pub clock_id,
+        pub state,
+    }
+});
+
+prop!(0x20001 {
+    pub request GetPowerState {
+        pub device_id,
+    }
+    pub response GetPowerStateResponse {
+        pub device_id,
+        pub state,
+    }
+});
+
+prop!(0x28001 {
+    pub request SetPowerState {
+        pub device_id,
+        pub state,
+    }
+    pub response SetPowerStateResponse {
+        pub device_id,
+        pub state,
+    }
+});

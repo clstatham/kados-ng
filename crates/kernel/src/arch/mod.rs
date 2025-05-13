@@ -7,6 +7,8 @@ pub use self::aarch64::AArch64 as Arch;
 #[cfg(target_arch = "aarch64")]
 pub use self::aarch64::*;
 
+pub mod driver;
+
 use crate::{
     dtb::IrqChipTrait,
     mem::{
@@ -50,7 +52,7 @@ pub trait ArchTrait {
 
     unsafe fn init_pre_kernel_main();
     unsafe fn init_mem(mapper: &mut PageTable);
-    unsafe fn init_post_heap();
+    unsafe fn init_drivers();
     unsafe fn init_interrupts();
     unsafe fn init_cpu_local_block();
     unsafe fn init_syscalls();
@@ -85,5 +87,20 @@ pub trait ArchTrait {
     fn emergency_reset() -> !;
     fn exit_qemu(code: u32) -> !;
     fn halt();
-    fn hcf() -> !;
+    fn nop();
+
+    #[inline(always)]
+    fn hcf() -> ! {
+        loop {
+            Self::halt();
+            Self::nop();
+        }
+    }
+
+    #[inline(always)]
+    fn delay_cycles(cycles: usize) {
+        for _ in 0..cycles {
+            Self::nop();
+        }
+    }
 }

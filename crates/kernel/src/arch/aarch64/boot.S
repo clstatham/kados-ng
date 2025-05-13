@@ -8,7 +8,7 @@ _start:
     msr daifset, #0b1111
 
     mrs x1, SCTLR_EL2
-    bic x1, x1, #1                // clear M bit
+    bic x1, x1, #1
     msr SCTLR_EL2, x1
     isb
     
@@ -19,7 +19,17 @@ _start:
 
     mov x0, x19
     mov x1, xzr
-    bl mmu_init_el2
+    bl boot_el2
 1:
     wfe
     b 1b
+
+.equ DR, 0xFE201000
+.equ FR, 0xFE201018
+boot_uart_putc:
+    ldr w1, =FR
+    and w1, w1, #0x20
+    bne boot_uart_putc
+    ldr x1, =DR
+    str w0, [x1], #1
+    ret

@@ -5,7 +5,8 @@
     clippy::new_without_default,
     clippy::uninlined_format_args,
     clippy::identity_op,
-    clippy::unnecessary_cast
+    clippy::unnecessary_cast,
+    clippy::eq_op
 )]
 #![feature(if_let_guard, iter_next_chunk, array_chunks)]
 
@@ -90,8 +91,6 @@ pub(crate) fn kernel_main() -> ! {
 
     let boot_info = BOOT_INFO.get().unwrap();
 
-    arch::serial::init();
-
     for _ in 0..3 {
         println!();
     }
@@ -125,11 +124,6 @@ pub(crate) fn kernel_main() -> ! {
     let fdt = boot_info.fdt.as_ref().unwrap();
     dtb::init(fdt);
 
-    log::info!("running init hooks (post-heap)...");
-    unsafe {
-        Arch::init_post_heap();
-    }
-
     log::info!("initializing per-cpu structure...");
     unsafe {
         Arch::init_cpu_local_block();
@@ -138,6 +132,17 @@ pub(crate) fn kernel_main() -> ! {
     log::info!("initializing timer...");
     arch::time::init(fdt);
 
+    unsafe { Arch::enable_interrupts() };
+
+    log::info!("running init hooks (post-heap)...");
+    unsafe {
+        Arch::init_drivers();
+    }
+
+    unsafe {
+        Arch::disable_interrupts();
+    }
+
     log::info!("initializing task contexts...");
     task::context::init();
 
@@ -145,6 +150,7 @@ pub(crate) fn kernel_main() -> ! {
 
     task::spawn(false, test).unwrap();
 
+    #[rustfmt::skip]
     println!(
         r#"
 welcome to...
@@ -156,11 +162,11 @@ welcome to...
    \ \__\\ \__\ \__\ \__\ \_______\ \_______\____\_\  \ 
     \|__| \|__|\|__|\|__|\|_______|\|_______|\_________\
                                             \|_________|
-                                                        
-    "#
+
+"#
     );
 
-    unsafe { Arch::enable_interrupts() };
+    unsafe { Arch::enable_interrupts() }
 
     Arch::hcf();
 }

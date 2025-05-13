@@ -89,7 +89,7 @@ impl log::Log for Logger {
 }
 
 pub fn init() {
-    log::set_logger(&Logger).unwrap();
+    log::set_logger(&Logger).ok();
     log::set_max_level(log::LevelFilter::Debug);
     log::info!("Logger initialized");
 }

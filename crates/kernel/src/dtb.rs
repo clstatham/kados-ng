@@ -1,6 +1,6 @@
 //! A lot of this code was taken from and inspired by Redox
 
-use alloc::boxed::Box;
+use alloc::{boxed::Box, vec::Vec};
 use derive_more::{Deref, Display, From, Into};
 use fdt::{Fdt, node::FdtNode, standard_nodes::MemoryRegion};
 use spin::Once;
@@ -31,11 +31,38 @@ pub fn init(fdt: &Fdt) {
     //         println!("    {}", prop.name);
     //     }
     // }
+    // dump(fdt);
 
     #[allow(static_mut_refs)]
     unsafe {
         IRQ_CHIP.call_once(|| IrqChip::new(fdt))
     };
+}
+
+pub fn dump(fdt: &Fdt) {
+    log::debug!("BEGIN FDT DUMP");
+
+    log::debug!("    ROOT: {}", fdt.root().compatible().first());
+    if let Some(aliases) = fdt.aliases() {
+        log::debug!("    BEGIN ALIASES");
+        for alias in aliases.all() {
+            log::debug!("        {}: {}", alias.0, alias.1);
+        }
+        log::debug!("    END ALIASES");
+    }
+    log::debug!("    BEGIN NODES");
+    for node in fdt.all_nodes() {
+        log::debug!(
+            "        {}: {:?}",
+            node.name,
+            node.compatible()
+                .map(|c| c.all().collect::<Vec<_>>())
+                .unwrap_or_default(),
+        );
+    }
+    log::debug!("    END NODES");
+
+    log::debug!("END FDT DUMP");
 }
 
 pub unsafe fn register_irq(irq: Irq, handler: impl IrqHandlerTrait) {
@@ -50,6 +77,12 @@ pub unsafe fn register_irq(irq: Irq, handler: impl IrqHandlerTrait) {
     }
 
     irq_chip.descs[irq.as_usize()].handler = Some(Box::new(handler));
+    irq_chip.enable_irq(irq);
+    irq_chip.descs[irq.as_usize()]
+        .handler
+        .as_mut()
+        .unwrap()
+        .post_register_hook(irq);
 }
 
 pub unsafe fn enable_irq(irq: Irq) {
@@ -84,6 +117,8 @@ macro_rules! u32_wrappers {
 u32_wrappers!(Irq, Phandle);
 
 pub trait IrqHandlerTrait: Send + Sync + 'static {
+    #[allow(unused)]
+    fn post_register_hook(&mut self, irq: Irq) {}
     fn handle_irq(&mut self, irq: Irq);
 }
 

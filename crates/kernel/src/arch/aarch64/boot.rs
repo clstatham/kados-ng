@@ -9,6 +9,7 @@ use crate::{
         paging::{MemMapEntries, MemMapEntry},
         units::{FrameCount, PhysAddr},
     },
+    println,
     serial::PERIPHERAL_BASE,
 };
 
@@ -24,7 +25,6 @@ unsafe extern "C" {
     unsafe static __kernel_phys_start: u8;
     unsafe static __kernel_phys_end: u8;
     unsafe static __kernel_virt_start: u8;
-    unsafe static __boot_table_higher: u8;
     unsafe static __kernel_virt_end: u8;
 }
 
@@ -33,13 +33,15 @@ pub struct Table([usize; 512]);
 
 #[unsafe(no_mangle)]
 #[unsafe(link_section = ".boot")]
-pub unsafe extern "C" fn mmu_init_el2(dtb_ptr: *const u8) -> ! {
+pub unsafe extern "C" fn boot_el2(dtb_ptr: *const u8) -> ! {
     unsafe {
         if core_affinity() != 0 {
             loop {
                 asm!("wfe");
             }
         }
+
+        boot_uart_putc(b'A');
 
         let mut off = &__boot_table as *const _ as usize;
 
@@ -50,6 +52,8 @@ pub unsafe extern "C" fn mmu_init_el2(dtb_ptr: *const u8) -> ! {
             | Arch::PAGE_FLAG_NON_BLOCK
             | Arch::PAGE_FLAG_NORMAL
             | Arch::PAGE_FLAG_PRESENT;
+
+        boot_uart_putc(b'B');
 
         map_range(
             &mut off,
@@ -65,13 +69,17 @@ pub unsafe extern "C" fn mmu_init_el2(dtb_ptr: *const u8) -> ! {
         let kernel_virt = &__kernel_virt_start as *const _ as usize;
         let kernel_size = kernel_phys_end - kernel_phys;
 
+        boot_uart_putc(b'C');
         map_range(&mut off, l0, kernel_phys, kernel_virt, kernel_size, flags);
 
         let boot_phys = &__boot_start as *const _ as usize;
         let boot_phys_end = &__boot_end as *const _ as usize;
         let boot_size = boot_phys_end - boot_phys;
+
+        boot_uart_putc(b'D');
         map_range(&mut off, l0, boot_phys, boot_phys, boot_size, flags);
 
+        boot_uart_putc(b'E');
         map_range(
             &mut off,
             l0,
@@ -81,6 +89,7 @@ pub unsafe extern "C" fn mmu_init_el2(dtb_ptr: *const u8) -> ! {
             Arch::PAGE_FLAG_DEVICE,
         );
 
+        boot_uart_putc(b'F');
         map_range(
             &mut off,
             l0,
@@ -90,17 +99,13 @@ pub unsafe extern "C" fn mmu_init_el2(dtb_ptr: *const u8) -> ! {
             flags,
         );
 
-        let stack_bottom = &__boot_stack_bottom as *const _ as usize;
-        let stack_top = &__boot_stack_top as *const _ as usize;
-        let stack_size = stack_top - stack_bottom;
-        map_range(&mut off, l0, stack_bottom, stack_bottom, stack_size, flags);
-
         const MCI: usize = (1 << 0) | (1 << 2) | (1 << 12);
         const TCR0: usize =
             ((64 - 48) << 0) | (0b01 << 8) | (0b01 << 10) | (0b11 << 12) | (0b00 << 14);
         const TCR1: usize =
             ((64 - 48) << 16) | (0b01 << 24) | (0b01 << 26) | (0b11 << 28) | (0b10 << 30);
 
+        boot_uart_putc(b'G');
         asm!(
             "mov x19, {dtb_ptr}",
 
@@ -149,7 +154,9 @@ pub unsafe extern "C" fn mmu_init_el2(dtb_ptr: *const u8) -> ! {
             "mov    x0, x19",
             "msr    spsr_el2, {spsr}",
             "msr    SPSel, #1",
-            "msr    elr_el2,  {entry}",
+            "msr    elr_el2, {entry}",
+
+
             "eret",
 
             mair        = in(reg) ((0xff << 8) | 0x00) as u64,
@@ -169,6 +176,9 @@ pub unsafe extern "C" fn mmu_init_el2(dtb_ptr: *const u8) -> ! {
 
 extern "C" fn boot_higher_half(dtb_ptr: *const u8) -> ! {
     unsafe {
+        super::serial::init();
+        println!();
+        println!("parsing FDT");
         let fdt = Fdt::from_ptr(dtb_ptr).unwrap();
         let mut mem_map = MemMapEntries::new();
 
@@ -180,6 +190,7 @@ extern "C" fn boot_higher_half(dtb_ptr: *const u8) -> ! {
         let is_kernel = |p| (kernel_phys_start..kernel_phys_end).contains(&p);
         let is_boot = |p| (boot_phys_start..boot_phys_end).contains(&p);
 
+        println!("enumerating memory regions");
         for region in fdt.memory().regions() {
             let mut start = (region.starting_address as usize).max(boot_phys_start);
             let end = start + region.size.unwrap_or(0);
@@ -232,6 +243,7 @@ extern "C" fn boot_higher_half(dtb_ptr: *const u8) -> ! {
 
         BOOT_INFO.call_once(|| boot_info);
 
+        println!("calling kernel_main");
         crate::kernel_main()
     }
 }
@@ -248,14 +260,17 @@ pub fn alloc_table(off: &mut usize) -> &'static mut Table {
 
 #[unsafe(link_section = ".boot")]
 #[allow(unused)]
+#[inline(always)]
 pub unsafe fn memset(mut ptr: *mut u8, mut size: usize, value: u8) {
     unsafe {
         asm!(
             "
         1:
-            strb {value:w}, [{ptr}], #1
-            subs {size}, {size}, #1
+            str {value:w}, [{ptr}], #1
+            sub {size}, {size}, #1
             bne 1b
+            dsb sy
+            isb
         ",
             ptr = inout(reg) ptr,
             size = inout(reg) size,
@@ -401,30 +416,6 @@ fn map_to_4kib(off: &mut usize, table: &mut Table, phys: usize, virt: usize, fla
     set_entry(&mut l3.0[idx], phys, flags);
 }
 
-// #[unsafe(link_section = ".boot")]
-// pub fn map_range_el2(
-//     off: &mut usize,
-//     table: &mut Table,
-//     phys: usize,
-//     virt: usize,
-//     size: usize,
-//     flags: usize,
-// ) {
-//     let mut mapped = 0;
-//     while mapped < size {
-//         let phys = phys + mapped;
-//         let virt = virt + mapped;
-//         let insert_flags = Arch::PAGE_FLAG_TYPE;
-//         let l1 = next_table(off, table, l0_index(virt), insert_flags);
-//         let l2 = next_table(off, l1, l1_index(virt), insert_flags);
-//         let l3 = next_table(off, l2, l2_index(virt), insert_flags);
-//         let idx = l3_index(virt);
-//         set_entry(&mut l3.0[idx], phys, flags);
-
-//         mapped += Arch::PAGE_SIZE;
-//     }
-// }
-
 #[unsafe(link_section = ".boot")]
 #[inline(always)]
 pub fn core_affinity() -> u8 {
@@ -434,3 +425,22 @@ pub fn core_affinity() -> u8 {
     }
     (mpidr & 0xff) as u8
 }
+
+unsafe extern "C" {
+    unsafe fn boot_uart_putc(c: u8);
+}
+
+// const MMIO_BASE: usize = 0xFE00_0000;
+// const PL011_DR: *mut u32 = (MMIO_BASE + 0x00201000) as *mut u32;
+// const PL011_FR: *mut u32 = (MMIO_BASE + 0x00201018) as *mut u32;
+
+// #[unsafe(link_section = ".boot")]
+// #[inline(always)]
+// fn boot_uart_putc(c: u8) {
+//     unsafe {
+//         while PL011_FR.read_volatile() & 0x20 != 0 {
+//             asm!("nop")
+//         }
+//         PL011_DR.write_volatile(c as u32);
+//     }
+// }

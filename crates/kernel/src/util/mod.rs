@@ -23,3 +23,10 @@ macro_rules! int_wrapper {
         }
     };
 }
+
+#[inline(always)]
+pub fn spin_while(f: impl Fn() -> bool) {
+    while f() {
+        core::hint::spin_loop();
+    }
+}

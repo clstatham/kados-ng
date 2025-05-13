@@ -10,17 +10,16 @@ use crate::{
     dtb::{Phandle, get_mmio_addr},
     framebuffer::FramebufferInfo,
     mem::{
-        paging::{
-            allocator::KernelFrameAllocator,
-            table::{PageFlags, PageTable, TableKind},
-        },
-        units::{FrameCount, PhysAddr, VirtAddr},
+        paging::table::{PageFlags, PageTable, TableKind},
+        units::{PhysAddr, VirtAddr},
     },
     syscall::errno::Errno,
 };
 
-use super::AArch64;
+use crate::arch::Arch;
 use props::*;
+
+use super::dma_alloc;
 
 pub mod props;
 
@@ -104,7 +103,7 @@ pub trait MailboxProperty: Sized {
     fn decode_response(response: &[u32]) -> Option<Self::Response>;
 }
 
-pub const MAX_PROPS: usize = AArch64::PAGE_SIZE / size_of::<u32>();
+pub const MAX_PROPS: usize = Arch::PAGE_SIZE / size_of::<u32>();
 
 #[derive(Deref, DerefMut)]
 #[repr(C, align(16))]
@@ -133,25 +132,24 @@ pub struct MailboxRequest {
 
 impl MailboxRequest {
     pub fn new() -> MailboxRequest {
-        let frame = unsafe {
-            KernelFrameAllocator.allocate(FrameCount::from_bytes(size_of::<MailboxBuffer>()))
-        }
-        .unwrap();
-        let mut mapper = PageTable::current(TableKind::Kernel);
-        mapper
-            .kernel_map_range(
-                frame.as_identity_virt(),
-                frame,
-                size_of::<MailboxBuffer>(),
-                PageFlags::new_device(),
-            )
-            .unwrap()
-            .flush();
+        // let frame = unsafe {
+        //     KernelFrameAllocator.allocate(FrameCount::from_bytes(size_of::<MailboxBuffer>()))
+        // }
+        // .unwrap();
+        // let mut mapper = PageTable::current(TableKind::Kernel);
+        // mapper
+        //     .kernel_map_range(
+        //         frame.as_identity_virt(),
+        //         frame,
+        //         size_of::<MailboxBuffer>(),
+        //         PageFlags::new_device(),
+        //     )
+        //     .unwrap()
+        //     .flush();
 
-        MailboxRequest {
-            buf: frame.as_hhdm_virt().as_raw_ptr_mut(),
-            index: 2,
-        }
+        let buf = unsafe { dma_alloc(size_of::<MailboxBuffer>()).cast() };
+
+        MailboxRequest { buf, index: 2 }
     }
 
     pub fn encode<T: MailboxProperty>(self, prop: T) -> Self {
@@ -194,7 +192,7 @@ pub struct MailboxResponse {
 }
 
 impl MailboxResponse {
-    pub fn decode<T: MailboxProperty>(&mut self) -> Option<T::Response> {
+    pub fn decode<T: MailboxProperty>(&self) -> Option<T::Response> {
         let buf = unsafe { &*self.buf };
         let size = buf.buffer_size() as usize;
         let mut i = 2;
@@ -210,16 +208,24 @@ impl MailboxResponse {
 
         None
     }
-}
 
-impl Drop for MailboxResponse {
-    fn drop(&mut self) {
-        let addr = VirtAddr::new_canonical(self.buf as usize).as_hhdm_phys();
-        KernelFrameAllocator
-            .free(addr, FrameCount::from_bytes(size_of::<MailboxBuffer>()))
-            .unwrap();
+    pub fn recycle(self) -> MailboxRequest {
+        let buf = self.buf.cast_mut();
+        unsafe {
+            (*buf).fill(0);
+        }
+        MailboxRequest { buf, index: 2 }
     }
 }
+
+// impl Drop for MailboxResponse {
+//     fn drop(&mut self) {
+//         let addr = VirtAddr::new_canonical(self.buf as usize).as_hhdm_phys();
+//         KernelFrameAllocator
+//             .free(addr, FrameCount::from_bytes(size_of::<MailboxBuffer>()))
+//             .unwrap();
+//     }
+// }
 
 #[derive(Debug)]
 pub struct Mailbox {
@@ -328,7 +334,7 @@ pub fn init(fdt: &Fdt) {
         .encode(GetPhysicalSize {})
         .encode(GetDepth {});
 
-    let mut response = unsafe { mbox.call(request, MailboxChannel::TagsArmToVc).unwrap() };
+    let response = unsafe { mbox.call(request, MailboxChannel::TagsArmToVc).unwrap() };
     let rev = response.decode::<GetFirmwareRevision>().unwrap();
     log::debug!("firmware revision: {:#x}", rev.revision);
     let buffer = response.decode::<AllocateBuffer>().unwrap();
@@ -345,7 +351,7 @@ pub fn init(fdt: &Fdt) {
     let depth = response.decode::<GetDepth>().unwrap();
     log::debug!("depth = {}", depth.depth);
 
-    // map it
+    // map the framebuffer
     let mut mapper = PageTable::current(TableKind::Kernel);
     let frame = PhysAddr::new_canonical(base_addr as usize);
     let page = frame.as_hhdm_virt();
@@ -366,4 +372,7 @@ pub fn init(fdt: &Fdt) {
         height: phys_size.height as usize,
         bpp: depth.depth as usize,
     });
+
+    // PCIe
+    super::pcie::init(&mut mbox);
 }

@@ -131,7 +131,10 @@ pub fn switch() -> SwitchResult {
     {
         let contexts = CONTEXTS.read();
 
-        let prev_lock = current().unwrap();
+        let Some(prev_lock) = current() else {
+            SWITCH_LOCK.store(false, Ordering::SeqCst);
+            return SwitchResult::AllIdle;
+        };
         let prev_guard = prev_lock.write_arc();
 
         let idle = block.switch_state.idle_context();

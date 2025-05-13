@@ -27,6 +27,8 @@ pub enum Mode {
         #[clap(short, long, default_value_t = false)]
         release: bool,
     },
+    /// Send the kernel over USB UART to the Raspberry Pi
+    Load,
 }
 
 #[derive(Parser)]
@@ -159,25 +161,9 @@ impl Context {
             .join("linker.ld")
     }
 
-    // pub fn uboot_dir(&self) -> PathBuf {
-    //     self.build_root.join("target").join("u-boot")
-    // }
-
-    // pub fn limine_dir(&self) -> PathBuf {
-    //     self.build_root.join("target").join("limine")
-    // }
-
     pub fn rpi_firmware_dir(&self) -> PathBuf {
         self.build_root.join("target").join("firmware")
     }
-
-    // pub fn iso_root_dir(&self) -> PathBuf {
-    //     self.target_dir().join("iso_root")
-    // }
-
-    // pub fn iso_path(&self) -> PathBuf {
-    //     self.target_dir().join("kernel.iso")
-    // }
 
     pub fn rustflags(&self, module: &str) -> String {
         format!(
@@ -513,6 +499,12 @@ fn main() -> anyhow::Result<()> {
         Mode::Flash { device, release } => {
             let cx = Context::new(args.target, release)?;
             cx.flash_rpi(device.as_str())?;
+        }
+        Mode::Load => {
+            let cx = Context::new(args.target, true)?;
+            cx.full_build_kernel()?;
+            let kernel_bin_path = cx.kernel_bin_path();
+            cmd!(cx.sh, "python3 ./chainload.py {kernel_bin_path}").run()?;
         }
     }
 

@@ -2,7 +2,7 @@ OUTPUT_ARCH(aarch64)
 OUTPUT_FORMAT(elf64-littleaarch64)
 ENTRY(_start)
 
-BOOT_OFFSET = 0x00080000;
+BOOT_OFFSET = 0x80000;
 KERNEL_OFFSET = 0xffffffff80000000;
 
 SECTIONS
@@ -16,12 +16,8 @@ SECTIONS
     . = ALIGN(16K);
         __boot_stack_top = .;
         __boot_table = .;
-        . += 1M;
+        . += 256K;
         __boot_table_end = .;
-    . = ALIGN(4096);
-        __boot_table_higher = .;
-        . += 1M;
-        __boot_table_higher_end = .;
     }
     __boot_end = .;
 

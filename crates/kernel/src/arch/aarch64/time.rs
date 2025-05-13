@@ -4,7 +4,7 @@ use aarch64_cpu::{asm::barrier, registers::*};
 use fdt::Fdt;
 
 use crate::{
-    dtb::{Irq, IrqHandlerTrait, enable_irq, register_irq},
+    dtb::{Irq, IrqHandlerTrait, register_irq},
     task::switch::switch,
 };
 
@@ -14,7 +14,6 @@ pub fn init(_fdt: &Fdt) {
 
     let irq = Irq(30);
     unsafe { register_irq(irq, timer) };
-    unsafe { enable_irq(irq) };
 }
 
 #[derive(Debug, Default)]
@@ -67,4 +66,10 @@ pub fn uptime() -> Duration {
     let nanos = (sub_seconds * 1_000_000_000 / clk_freq) as u32;
 
     Duration::new(secs as u64, nanos)
+}
+
+#[inline(always)]
+pub fn spin_for(dur: Duration) {
+    let stamp = uptime();
+    crate::util::spin_while(|| uptime() - stamp < dur);
 }

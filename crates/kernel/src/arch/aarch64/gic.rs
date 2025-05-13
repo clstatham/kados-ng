@@ -8,7 +8,7 @@ use crate::{
     syscall::errno::Errno,
 };
 
-use super::mmio::Mmio;
+use super::drivers::mmio::Mmio;
 
 const GICD_CTLR: usize = 0x000;
 const GICD_TYPER: usize = 0x004;
@@ -88,7 +88,7 @@ impl IrqChipTrait for Gic {
         let dist_virt = dist_phys.as_hhdm_virt();
         let cpu_virt = cpu_phys.as_hhdm_virt();
 
-        log::debug!("GIC_DIST = {dist_phys}, GIC_CPU = {cpu_phys}");
+        log::debug!("GIC_DIST @ {dist_virt}, GIC_CPU @ {cpu_virt}");
 
         unsafe {
             self.dist.init(dist_virt);

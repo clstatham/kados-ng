@@ -1,8 +1,4 @@
-use core::{
-    fmt::{self, Write},
-    marker::PhantomData,
-    ops::Deref,
-};
+use core::fmt::{self, Write};
 
 /* -------- base addresses ------------------------------------------------ */
 
@@ -31,28 +27,6 @@ const FBRD: *mut u32 = (UART0_BASE + 0x28) as *mut u32;
 const LCRH: *mut u32 = (UART0_BASE + 0x2C) as *mut u32;
 const CR: *mut u32 = (UART0_BASE + 0x30) as *mut u32;
 const ICR: *mut u32 = (UART0_BASE + 0x44) as *mut u32;
-
-pub struct Mmio<T> {
-    start_addr: usize,
-    _phantom: PhantomData<fn() -> T>,
-}
-
-impl<T> Mmio<T> {
-    pub const unsafe fn new(start_addr: usize) -> Self {
-        Self {
-            start_addr,
-            _phantom: PhantomData,
-        }
-    }
-}
-
-impl<T> Deref for Mmio<T> {
-    type Target = T;
-
-    fn deref(&self) -> &Self::Target {
-        unsafe { &*(self.start_addr as *const T) }
-    }
-}
 
 pub struct GpioUart;
 
@@ -97,9 +71,9 @@ impl GpioUart {
             /* 3 ─── Clear pending interrupts */
             write_volatile(ICR, 0x7FF);
 
-            /* 4 ─── Baud: 115 200 bps with 48 MHz clock  →  divisor 26.0416 */
-            write_volatile(IBRD, 26); // integer part
-            write_volatile(FBRD, 3); // round((0.0416*64)+0.5)
+            // /* 4 ─── Baud: 115 200 bps with 48 MHz clock  →  divisor 26.0416 */
+            // write_volatile(IBRD, 3); // integer part
+            // write_volatile(FBRD, 16); // round((0.0416*64)+0.5)
 
             /* 5 ─── 8 data bits, FIFO enabled */
             write_volatile(LCRH, (1 << 4) | (3 << 5)); // FEN | WLEN=0b11 (8 bits)
