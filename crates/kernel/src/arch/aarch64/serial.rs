@@ -71,9 +71,9 @@ impl GpioUart {
             /* 3 ─── Clear pending interrupts */
             write_volatile(ICR, 0x7FF);
 
-            // /* 4 ─── Baud: 115 200 bps with 48 MHz clock  →  divisor 26.0416 */
-            // write_volatile(IBRD, 3); // integer part
-            // write_volatile(FBRD, 16); // round((0.0416*64)+0.5)
+            // /* 4 ─── Baud: 921600 bps */
+            write_volatile(IBRD, 3);
+            write_volatile(FBRD, 16);
 
             /* 5 ─── 8 data bits, FIFO enabled */
             write_volatile(LCRH, (1 << 4) | (3 << 5)); // FEN | WLEN=0b11 (8 bits)
@@ -90,7 +90,7 @@ impl GpioUart {
             loop {
                 let fr = FR.read_volatile();
                 if fr & (1 << 5) != 0 {
-                    // nop();
+                    core::arch::asm!("nop");
                 } else {
                     break;
                 }

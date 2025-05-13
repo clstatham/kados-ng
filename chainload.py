@@ -31,8 +31,9 @@ def send_kernel(ser: serial.Serial, kernel: bytes) -> bool:
 
 
 def serial_monitor(ser: serial.Serial):
+    ser.apply_settings({"timeout": 0.1})
     while True:
-        c = ser.read()
+        c = ser.read(1024)
         if c:
             sys.stdout.buffer.write(c)
             sys.stdout.buffer.flush()

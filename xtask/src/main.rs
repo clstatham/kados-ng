@@ -20,12 +20,17 @@ pub enum Mode {
         #[clap(short, long, default_value_t = false)]
         release: bool,
     },
-    /// Flash the built image to an SD card for the Raspberry Pi
+    /// Copy the kernel to an SD card for the Raspberry Pi
     Flash {
         /// Device to flash to (e.g. /dev/sdb)
         device: String,
         #[clap(short, long, default_value_t = false)]
         release: bool,
+    },
+    /// Build and copy the chainloader to an SD card for the Raspberry Pi
+    FlashChainloader {
+        /// Device to flash to (e.g. /dev/sdb)
+        device: String,
     },
     /// Send the kernel over USB UART to the Raspberry Pi
     Load,
@@ -101,12 +106,11 @@ pub struct Context {
     target: Target,
     profile: Profile,
     build_root: PathBuf,
-    kernel_elf_path: PathBuf,
 }
 
 impl Context {
     pub fn new(target: Target, release: bool) -> anyhow::Result<Self> {
-        let mut this = Self {
+        Ok(Self {
             sh: Shell::new()?,
             target,
             profile: if release {
@@ -114,13 +118,12 @@ impl Context {
             } else {
                 Profile::Debug
             },
-            build_root: env!("CARGO_MANIFEST_DIR").parse::<PathBuf>()?.join(".."), // ./xtask/.. = ./
-            kernel_elf_path: PathBuf::new(),
-        };
-
-        this.kernel_elf_path = this.target_dir().join("kernel"); // default kernel elf
-
-        Ok(this)
+            build_root: env!("CARGO_MANIFEST_DIR")
+                .parse::<PathBuf>()?
+                .parent()
+                .unwrap()
+                .to_path_buf(),
+        })
     }
 
     pub fn target_dir(&self) -> PathBuf {
@@ -141,15 +144,19 @@ impl Context {
     }
 
     pub fn kernel_elf_path(&self) -> PathBuf {
-        self.kernel_elf_path.clone()
+        self.target_dir().join("kernel")
     }
 
     pub fn kernel_bin_path(&self) -> PathBuf {
         self.kernel_elf_path().with_extension("bin")
     }
 
-    pub fn kernel_img_path(&self) -> PathBuf {
-        self.kernel_elf_path().with_extension("img")
+    pub fn chainloader_elf_path(&self) -> PathBuf {
+        self.target_dir().join("chainloader")
+    }
+
+    pub fn chainloader_bin_path(&self) -> PathBuf {
+        self.chainloader_elf_path().with_extension("bin")
     }
 
     pub fn linker_script_path(&self, module: &str) -> PathBuf {
@@ -198,100 +205,62 @@ impl Context {
             .env("RUSTFLAGS", self.rustflags("kernel"))
             .run()?;
 
-        match self.target {
-            Target::AArch64 => {
-                let kernel_elf_path = self.kernel_elf_path();
-                let kernel_bin_path = self.kernel_bin_path();
-                cmd!(
-                    self.sh,
-                    "llvm-objcopy -O binary {kernel_elf_path} {kernel_bin_path}"
-                )
-                .run()?;
-
-                self.create_new_image_rpi()?;
-
-                self.build_dependencies_rpi()?;
-
-                self.copy_files_to_image_rpi()?;
-            }
-        }
-
         log::info!("Kernel build complete!");
 
         Ok(())
     }
 
-    pub fn full_build_kernel_test(&mut self) -> anyhow::Result<()> {
-        log::info!("Building kernel tests with Cargo");
+    pub fn build_chainloader_rpi(&self) -> anyhow::Result<()> {
+        log::info!("Building chainloader with Cargo");
 
-        let cargo_output = cmd!(self.sh, "cargo")
-            .args(self.cargo_args("test", "kernel"))
-            .arg("--no-run")
-            .ignore_status()
-            .output()?;
+        cmd!(self.sh, "cargo")
+            .args(self.cargo_args("build", "chainloader"))
+            .env("RUSTFLAGS", self.rustflags("chainloader"))
+            .run()?;
 
-        let cargo_stdout = String::from_utf8_lossy(&cargo_output.stdout);
-        let cargo_stderr = String::from_utf8_lossy(&cargo_output.stderr);
-
-        println!("{cargo_stdout}");
-
-        if !cargo_output.status.success() {
-            eprintln!("{cargo_stderr}");
-            log::error!("Cargo command failed: {:?}", cargo_output.status);
-            anyhow::bail!("Cargo command failed");
-        }
-
-        // override self.kernel_elf_path with the test elf
-
-        let new_kernel_elf = cargo_stderr
-            .split("/deps/")
-            .last()
-            .unwrap()
-            .trim()
-            .strip_suffix(')')
-            .unwrap()
-            .to_string();
-        self.kernel_elf_path = self.target_dir().join("deps").join(new_kernel_elf);
-
-        // proceed with build as normal
-
-        match self.target {
-            Target::AArch64 => {
-                self.create_new_image_rpi()?;
-
-                self.build_dependencies_rpi()?;
-
-                self.copy_files_to_image_rpi()?;
-            }
-        }
-
-        log::info!("Kernel tests build complete!");
+        log::info!("Chainloader build complete!");
 
         Ok(())
     }
 
-    pub fn run_qemu(&self, debug_adapter: bool) -> anyhow::Result<()> {
-        match self.target {
-            Target::AArch64 => self.run_qemu_rpi(debug_adapter),
-        }
-    }
-
-    pub fn flash_rpi(&self, device: &str) -> anyhow::Result<()> {
-        self.full_build_kernel()?;
-
-        log::info!("Copying to SD card device {device} (will sudo)");
-        let kernel_elf_path = self.kernel_elf_path();
-        let kernel_bin_path = self.kernel_bin_path();
-        let firmware_dir = self.rpi_firmware_dir();
+    pub fn flash_chainloader_rpi(&self, device: &str) -> anyhow::Result<()> {
+        log::info!("Copying chainlaoder to SD card device {device} (will sudo)");
+        let chainloader_elf_path = self.chainloader_elf_path();
+        let chainloader_bin_path = self.chainloader_bin_path();
 
         cmd!(self.sh, "sudo umount {device}")
             .ignore_status()
             .run()?;
 
-        cmd!(self.sh, "sudo mkdir -p /mnt/rpi-sd").run()?;
-        cmd!(self.sh, "sudo mount {device} /mnt/rpi-sd").run()?;
-        cmd!(self.sh, "sudo rm -rf /mnt/rpi-sd/*").run()?;
-        cmd!(self.sh, "sudo mkdir -p /mnt/rpi-sd/overlays").run()?;
+        cmd!(
+            self.sh,
+            "llvm-objcopy -O binary {chainloader_elf_path} {chainloader_bin_path}"
+        )
+        .run()?;
+
+        cmd!(
+            self.sh,
+            "sudo cp {chainloader_bin_path} /mnt/rpi-sd/kernel8.img"
+        )
+        .run()?;
+
+        self.copy_common(device)?;
+
+        cmd!(self.sh, "sudo umount {device}").run()?;
+
+        log::info!("Copy complete!");
+
+        Ok(())
+    }
+
+    pub fn flash_kernel_rpi(&self, device: &str) -> anyhow::Result<()> {
+        log::info!("Copying kernel to SD card device {device} (will sudo)");
+        let kernel_elf_path = self.kernel_elf_path();
+        let kernel_bin_path = self.kernel_bin_path();
+
+        cmd!(self.sh, "sudo umount {device}")
+            .ignore_status()
+            .run()?;
 
         cmd!(
             self.sh,
@@ -300,6 +269,24 @@ impl Context {
         .run()?;
 
         cmd!(self.sh, "sudo cp {kernel_bin_path} /mnt/rpi-sd/kernel8.img").run()?;
+
+        self.copy_common(device)?;
+
+        cmd!(self.sh, "sudo umount {device}").run()?;
+
+        log::info!("Copy complete!");
+
+        Ok(())
+    }
+
+    fn copy_common(&self, device: &str) -> anyhow::Result<()> {
+        let firmware_dir = self.rpi_firmware_dir();
+
+        cmd!(self.sh, "sudo mkdir -p /mnt/rpi-sd").run()?;
+        cmd!(self.sh, "sudo mount {device} /mnt/rpi-sd").run()?;
+        cmd!(self.sh, "sudo rm -rf /mnt/rpi-sd/*").run()?;
+        cmd!(self.sh, "sudo mkdir -p /mnt/rpi-sd/overlays").run()?;
+
         cmd!(self.sh, "sudo cp config.txt /mnt/rpi-sd/config.txt").run()?;
         cmd!(
             self.sh,
@@ -327,17 +314,11 @@ impl Context {
         )
         .run()?;
 
-        cmd!(self.sh, "sudo umount {device}").run()?;
-
-        log::info!("Copy complete!");
-
         Ok(())
     }
 
     pub fn run_qemu_rpi(&self, debug_adapter: bool) -> anyhow::Result<()> {
         log::info!("Running QEMU");
-
-        let qemu_drive_arg = format!("file={},if=sd,format=raw", self.kernel_img_path().display());
 
         let kernel_arg = format!("{}", self.kernel_bin_path().display());
         let dtb_arg = format!(
@@ -355,8 +336,6 @@ impl Context {
             "raspi4b",
             "-cpu",
             "cortex-a72",
-            "-drive",
-            &qemu_drive_arg,
             "-kernel",
             &kernel_arg,
             "-dtb",
@@ -382,23 +361,7 @@ impl Context {
         Ok(())
     }
 
-    fn create_new_image_rpi(&self) -> anyhow::Result<()> {
-        log::info!("Creating new SD card image");
-
-        let kernel_img_path = self.kernel_img_path();
-
-        if kernel_img_path.exists() {
-            std::fs::remove_file(&kernel_img_path)?;
-        }
-
-        cmd!(self.sh, "truncate -s 128M {kernel_img_path}").run()?;
-        cmd!(self.sh, "mformat -i {kernel_img_path} ::").run()?;
-        cmd!(self.sh, "mmd -i {kernel_img_path} ::/overlays").run()?;
-
-        Ok(())
-    }
-
-    fn build_dependencies_rpi(&self) -> anyhow::Result<()> {
+    pub fn build_dependencies_rpi(&self) -> anyhow::Result<()> {
         let firmware_dir = self.rpi_firmware_dir();
 
         log::info!("Building dependencies");
@@ -414,62 +377,6 @@ impl Context {
             let _guard = self.sh.push_dir(&firmware_dir);
             cmd!(self.sh, "git fetch").run()?;
         }
-
-        Ok(())
-    }
-
-    fn copy_files_to_image_rpi(&self) -> anyhow::Result<()> {
-        log::info!("Copying files to SD card");
-
-        let kernel_elf_path = self.kernel_elf_path();
-        let kernel_bin_path = self.kernel_bin_path();
-        let kernel_img_path = self.kernel_img_path();
-        let firmware_dir = self.rpi_firmware_dir();
-
-        cmd!(
-            self.sh,
-            "llvm-objcopy -O binary {kernel_elf_path} {kernel_bin_path}"
-        )
-        .run()?;
-
-        cmd!(
-            self.sh,
-            "mcopy -i {kernel_img_path} {kernel_bin_path} ::/kernel8.img"
-        )
-        .run()?;
-
-        cmd!(
-            self.sh,
-            "mcopy -i {kernel_img_path} config.txt ::/config.txt"
-        )
-        .run()?;
-
-        cmd!(
-            self.sh,
-            "mcopy -i {kernel_img_path} {firmware_dir}/boot/bootcode.bin ::/bootcode.bin"
-        )
-        .run()?;
-        cmd!(
-            self.sh,
-            "mcopy -i {kernel_img_path} {firmware_dir}/boot/start4.elf ::/start4.elf"
-        )
-        .run()?;
-        cmd!(
-            self.sh,
-            "mcopy -i {kernel_img_path} {firmware_dir}/boot/fixup4.dat ::/fixup4.dat"
-        )
-        .run()?;
-        cmd!(
-            self.sh,
-            "mcopy -i {kernel_img_path} {firmware_dir}/boot/bcm2711-rpi-4-b.dtb ::/bcm2711-rpi-4-b.dtb"
-        )
-        .run()?;
-
-        cmd!(
-            self.sh,
-            "mcopy -i {kernel_img_path} {firmware_dir}/boot/overlays/disable-bt.dtbo ::/overlays/disable-bt.dtbo"
-        )
-        .run()?;
 
         Ok(())
     }
@@ -489,21 +396,31 @@ fn main() -> anyhow::Result<()> {
         Mode::Debug { release } => {
             let cx = Context::new(args.target, release)?;
             cx.full_build_kernel()?;
-            cx.run_qemu(true)?;
+            cx.build_dependencies_rpi()?;
+            cx.run_qemu_rpi(true)?;
         }
         Mode::Run { release } => {
             let cx = Context::new(args.target, release)?;
             cx.full_build_kernel()?;
-            cx.run_qemu(false)?;
+            cx.build_dependencies_rpi()?;
+            cx.run_qemu_rpi(false)?;
         }
         Mode::Flash { device, release } => {
             let cx = Context::new(args.target, release)?;
-            cx.flash_rpi(device.as_str())?;
+            cx.full_build_kernel()?;
+            cx.build_dependencies_rpi()?;
+            cx.flash_kernel_rpi(device.as_str())?;
+        }
+        Mode::FlashChainloader { device } => {
+            let cx = Context::new(args.target, true)?;
+            cx.build_chainloader_rpi()?;
+            cx.flash_chainloader_rpi(device.as_str())?;
         }
         Mode::Load => {
             let cx = Context::new(args.target, true)?;
-            cx.full_build_kernel()?;
             let kernel_bin_path = cx.kernel_bin_path();
+            cx.full_build_kernel()?;
+
             cmd!(cx.sh, "python3 ./chainload.py {kernel_bin_path}").run()?;
         }
     }
