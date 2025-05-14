@@ -23,16 +23,18 @@ SECTIONS
         KEEP( *libbootloader.a:(.data .data.*) )
     . = ALIGN(4K);
         __boot_stack_bottom = .;
-    . = ALIGN(16K);
+    . = ALIGN(4K);
         __boot_stack_top = .;
     } : boot
     .boot.bss (NOLOAD) : ALIGN(4K) {
+        __boot_bss = .;
         KEEP( *libbootloader.a:(.bss .bss.* COMMON) )
-        . = ALIGN(4K);
+    . = ALIGN(4K);
         __boot_table = .;
-        . += 256K;
+    . += 256K;
         __boot_table_end = .;
-    } : boot
+        __boot_bss_end = .;
+    }
     __boot_end = .;
 
     PROVIDE(__kernel_phys_start = ALIGN(__boot_end, 4K));
@@ -71,7 +73,7 @@ SECTIONS
     . += 0x20000;
         __stack_top = .;
         __bss_end = .;
-    } : kernel
+    }
     __kernel_virt_end = .;
     PROVIDE(__kernel_phys_end = __kernel_phys_start + SIZEOF(.text) + SIZEOF(.rodata) + SIZEOF(.data) + SIZEOF(.bss));
 

@@ -7,8 +7,6 @@ use core::{
     panic::PanicInfo,
 };
 
-// global_asm!(include_str!("boot.S"));
-
 unsafe extern "C" {
     unsafe static __boot_start: u8;
     unsafe static __boot_stack_bottom: u8;
@@ -62,9 +60,14 @@ pub struct Table([usize; 512]);
 pub unsafe extern "C" fn _start(dtb_ptr: *const u8) -> ! {
     naked_asm!(
         "
+        mov x19, x0
         ldr x1, =__boot_stack_top
         mov sp, x1
 
+        mrs x1, MPIDR_EL1
+        ands x1, x1, #0xff
+        b.ne 3f
+        
         msr daifset, #0b1111
 
         mrs x1, SCTLR_EL2
@@ -77,17 +80,23 @@ pub unsafe extern "C" fn _start(dtb_ptr: *const u8) -> ! {
         msr SCTLR_EL1, x1
         isb
 
-        adr x1, __boot_table
-        adr x2, __boot_table_end
-        sub x2, x2, x1
-        cbz x2, 2f
+        ldr x1, =__boot_bss
+        ldr x2, =__boot_bss_end
+        mov x3, xzr
     1:
-        stp xzr, xzr, [x1], #16
-        sub x2, x2, #16
-        cbnz x2, 1b
+        cmp x1, x2
+        b.hs 2f
+        str x3, [x1], #8
+        b 1b
     2:
-        
-        b boot_el2
+
+        mov x0, x19
+        bl boot_el2
+    
+    3:
+        dsb sy
+        1: wfe
+        b 1b
         ",
     )
 }
@@ -95,12 +104,6 @@ pub unsafe extern "C" fn _start(dtb_ptr: *const u8) -> ! {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn boot_el2(dtb_ptr: *const u8) -> ! {
     unsafe {
-        if core_affinity() != 0 {
-            loop {
-                asm!("wfe");
-            }
-        }
-
         // boot_uart_putc(b'A');
 
         let mut off = &__boot_table as *const _ as usize;
@@ -209,7 +212,6 @@ pub unsafe extern "C" fn boot_el2(dtb_ptr: *const u8) -> ! {
             "msr    SPSel, #1",
             "msr    elr_el2, {entry}",
 
-
             "eret",
 
             mair        = in(reg) ((0xff << 8) | 0x00) as u64,
@@ -230,8 +232,30 @@ pub unsafe extern "C" fn boot_el2(dtb_ptr: *const u8) -> ! {
 #[inline(always)]
 pub fn alloc_table(off: &mut usize) -> &'static mut Table {
     let table = unsafe { &mut *(*off as *mut Table) };
+    memzero(table as *mut Table as *mut u8, size_of::<Table>());
     *off += size_of::<Table>();
     table
+}
+
+#[inline(always)]
+pub fn memzero(ptr: *mut u8, size: usize) {
+    unsafe {
+        asm!(
+            "mov x0, {start}",
+            "mov x1, {end}",
+            "mov x2, xzr",
+            "1: cmp x0, x1",
+            "b.hs 2f",
+            "str x2, [x0], #8",
+            "b 1b",
+            "2:",
+            start = in(reg) ptr as u64,
+            end = in(reg) (ptr as u64 + size as u64),
+            out("x0") _,
+            out("x1") _,
+            out("x2") _,
+        )
+    }
 }
 
 pub const fn l0_index(addr: usize) -> usize {
@@ -353,30 +377,6 @@ fn map_to_4kib(off: &mut usize, table: &mut Table, phys: usize, virt: usize, fla
     let idx = l3_index(virt);
     set_entry(&mut l3.0[idx], phys, flags);
 }
-
-#[inline(always)]
-pub fn core_affinity() -> u8 {
-    let mpidr: usize;
-    unsafe {
-        asm!("mrs {0}, mpidr_el1", out(reg) mpidr);
-    }
-    (mpidr & 0xff) as u8
-}
-
-// const MMIO_BASE: usize = 0xFE00_0000;
-// const PL011_DR: *mut u32 = (MMIO_BASE + 0x00201000) as *mut u32;
-// const PL011_FR: *mut u32 = (MMIO_BASE + 0x00201018) as *mut u32;
-
-//
-// #[inline(always)]
-// fn boot_uart_putc(c: u8) {
-//     unsafe {
-//         while PL011_FR.read_volatile() & 0x20 != 0 {
-//             asm!("nop")
-//         }
-//         PL011_DR.write_volatile(c as u32);
-//     }
-// }
 
 #[linkage = "weak"]
 #[panic_handler]

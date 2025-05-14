@@ -1,3 +1,5 @@
+use core::arch::asm;
+
 use fdt::Fdt;
 
 use crate::{
@@ -19,9 +21,32 @@ unsafe extern "C" {
     unsafe static __kernel_virt_end: u8;
 }
 
+unsafe fn clear_bss() {
+    unsafe {
+        asm!(
+            "
+
+        ldr x1, =__bss_start
+        ldr x2, =__bss_end
+        mov x3, xzr
+    1:
+        cmp x1, x2
+        b.hs 2f
+        str x3, [x1], #8
+        b 1b
+    2:
+        ",
+        out("x1") _,
+        out("x2") _,
+        out("x3") _,
+        )
+    }
+}
+
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn boot_higher_half(dtb_ptr: *const u8) -> ! {
     unsafe {
+        clear_bss();
         super::serial::init();
         println!();
         println!("parsing FDT");

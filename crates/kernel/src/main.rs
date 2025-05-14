@@ -81,7 +81,7 @@ elf_offsets!(
 );
 
 #[unsafe(no_mangle)]
-pub(crate) fn kernel_main() -> ! {
+pub(crate) extern "C" fn kernel_main() -> ! {
     unsafe {
         Arch::disable_interrupts();
 

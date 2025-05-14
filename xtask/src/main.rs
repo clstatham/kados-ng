@@ -172,7 +172,7 @@ impl Context {
             ));
         } else if module == "kernel" {
             flags.push_str(&format!(
-                " -Clink-arg=-T{}  -Lnative={} -Clink-arg=-lbootloader ", // -Clink-arg=--whole-archive -Clink-arg=-lbootloader -Clink-arg=--no-whole-archive",
+                " -Clink-arg=-T{} -Lnative={} -Clink-arg=-lbootloader",
                 self.linker_script_path(module).display(),
                 self.target_dir().display(),
             ));
@@ -221,11 +221,6 @@ impl Context {
         self.build_bootloader()?;
 
         log::info!("Building kernel with Cargo");
-
-        cmd!(self.sh, "cargo")
-            .args(self.cargo_args("build", "bootloader"))
-            .env("RUSTFLAGS", self.rustflags("bootloader"))
-            .run()?;
 
         cmd!(self.sh, "cargo")
             .args(self.cargo_args("build", "kernel"))
