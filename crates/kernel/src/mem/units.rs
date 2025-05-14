@@ -51,10 +51,6 @@ impl PhysAddr {
     }
 
     pub const unsafe fn new_unchecked(addr: usize) -> Self {
-        debug_assert!(
-            canonicalize_physaddr(addr) == addr,
-            "PhysAddr::new_unchecked() called on non-canonical physical address"
-        );
         Self(addr)
     }
 

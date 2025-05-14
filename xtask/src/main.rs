@@ -33,7 +33,12 @@ pub enum Mode {
         device: String,
     },
     /// Send the kernel over USB UART to the Raspberry Pi
-    Load,
+    Load {
+        #[clap(short, long, default_value_t = false)]
+        release: bool,
+        #[clap(long, default_value_t = false)]
+        mon: bool,
+    },
 }
 
 #[derive(Parser)]
@@ -83,24 +88,6 @@ impl Display for Profile {
     }
 }
 
-#[macro_export]
-macro_rules! args {
-    ($($val:expr),*) => {{
-        let mut args = Vec::<String>::new();
-        $crate::extend!(args <- $($val),*);
-        args
-    }};
-}
-
-#[macro_export]
-macro_rules! extend {
-    ($args:ident <- $($val:expr),*) => {{
-        $(
-            $args.push(AsRef::<str>::as_ref($val).to_string());
-        )*
-    }};
-}
-
 pub struct Context {
     sh: Shell,
     target: Target,
@@ -143,6 +130,10 @@ impl Context {
             .with_extension("json")
     }
 
+    pub fn bootloader_elf_path(&self) -> PathBuf {
+        self.target_dir().join("libbootloader.a")
+    }
+
     pub fn kernel_elf_path(&self) -> PathBuf {
         self.target_dir().join("kernel")
     }
@@ -173,37 +164,81 @@ impl Context {
     }
 
     pub fn rustflags(&self, module: &str) -> String {
-        format!(
-            "-C link-arg=-T{} -Cforce-frame-pointers=yes -C symbol-mangling-version=v0",
-            self.linker_script_path(module).display(),
-        )
+        let mut flags = "-Cforce-frame-pointers=yes -C symbol-mangling-version=v0".to_string();
+        if module == "bootloader" {
+            flags.push_str(&format!(
+                " -Clink-arg=-r -Clink-arg=-T{}",
+                self.linker_script_path(module).display(),
+            ));
+        } else if module == "kernel" {
+            flags.push_str(&format!(
+                " -Clink-arg=-T{}  -Lnative={} -Clink-arg=-lbootloader ", // -Clink-arg=--whole-archive -Clink-arg=-lbootloader -Clink-arg=--no-whole-archive",
+                self.linker_script_path(module).display(),
+                self.target_dir().display(),
+            ));
+        } else {
+            flags.push_str(&format!(
+                " -Clink-arg=-T{}",
+                self.linker_script_path(module).display()
+            ));
+        }
+        log::debug!("RUSTFLAGS={}", &flags);
+        flags
     }
 
     pub fn cargo_args(&self, mode: &str, module: &str) -> Vec<String> {
-        let mut cargo_args = args!(
-            mode,
-            "--target",
-            &self.target_json_path().to_string_lossy(),
-            "-p",
-            module,
-            "-Zbuild-std=core,compiler_builtins,alloc",
-            "-Zbuild-std-features=compiler-builtins-mem"
-        );
+        let mut cargo_args = vec![
+            mode.to_string(),
+            "--target".to_string(),
+            self.target_json_path().to_string_lossy().into_owned(),
+            "-p".to_string(),
+            module.to_string(),
+            "-Zbuild-std=core,compiler_builtins,alloc".to_string(),
+            "-Zbuild-std-features=compiler-builtins-mem".to_string(),
+        ];
 
         if self.profile == Profile::Release {
-            extend!(cargo_args <- "--release");
+            cargo_args.push("--release".to_string());
         }
 
         cargo_args
     }
 
+    pub fn build_bootloader(&self) -> anyhow::Result<()> {
+        log::info!("Building bootloader with Cargo");
+
+        cmd!(self.sh, "cargo")
+            .args(self.cargo_args("build", "bootloader"))
+            .env("RUSTFLAGS", self.rustflags("bootloader"))
+            .run()?;
+
+        log::info!("Bootloader build complete!");
+
+        Ok(())
+    }
+
     pub fn full_build_kernel(&self) -> anyhow::Result<()> {
+        self.build_bootloader()?;
+
         log::info!("Building kernel with Cargo");
+
+        cmd!(self.sh, "cargo")
+            .args(self.cargo_args("build", "bootloader"))
+            .env("RUSTFLAGS", self.rustflags("bootloader"))
+            .run()?;
 
         cmd!(self.sh, "cargo")
             .args(self.cargo_args("build", "kernel"))
             .env("RUSTFLAGS", self.rustflags("kernel"))
             .run()?;
+
+        let kernel_elf_path = self.kernel_elf_path();
+        let kernel_bin_path = self.kernel_bin_path();
+        cmd!(
+            self.sh,
+            "llvm-objcopy -O binary {kernel_elf_path} {kernel_bin_path}"
+        )
+        .run()?;
 
         log::info!("Kernel build complete!");
 
@@ -218,6 +253,14 @@ impl Context {
             .env("RUSTFLAGS", self.rustflags("chainloader"))
             .run()?;
 
+        let chainloader_elf_path = self.chainloader_elf_path();
+        let chainloader_bin_path = self.chainloader_bin_path();
+        cmd!(
+            self.sh,
+            "llvm-objcopy -O binary {chainloader_elf_path} {chainloader_bin_path}"
+        )
+        .run()?;
+
         log::info!("Chainloader build complete!");
 
         Ok(())
@@ -225,18 +268,11 @@ impl Context {
 
     pub fn flash_chainloader_rpi(&self, device: &str) -> anyhow::Result<()> {
         log::info!("Copying chainlaoder to SD card device {device} (will sudo)");
-        let chainloader_elf_path = self.chainloader_elf_path();
         let chainloader_bin_path = self.chainloader_bin_path();
 
         cmd!(self.sh, "sudo umount {device}")
             .ignore_status()
             .run()?;
-
-        cmd!(
-            self.sh,
-            "llvm-objcopy -O binary {chainloader_elf_path} {chainloader_bin_path}"
-        )
-        .run()?;
 
         cmd!(
             self.sh,
@@ -255,18 +291,11 @@ impl Context {
 
     pub fn flash_kernel_rpi(&self, device: &str) -> anyhow::Result<()> {
         log::info!("Copying kernel to SD card device {device} (will sudo)");
-        let kernel_elf_path = self.kernel_elf_path();
         let kernel_bin_path = self.kernel_bin_path();
 
         cmd!(self.sh, "sudo umount {device}")
             .ignore_status()
             .run()?;
-
-        cmd!(
-            self.sh,
-            "llvm-objcopy -O binary {kernel_elf_path} {kernel_bin_path}"
-        )
-        .run()?;
 
         cmd!(self.sh, "sudo cp {kernel_bin_path} /mnt/rpi-sd/kernel8.img").run()?;
 
@@ -384,7 +413,7 @@ impl Context {
 
 fn main() -> anyhow::Result<()> {
     env_logger::builder()
-        .filter_level(log::LevelFilter::Info)
+        .filter_level(log::LevelFilter::Debug)
         .init();
     let args = Args::parse();
 
@@ -416,12 +445,16 @@ fn main() -> anyhow::Result<()> {
             cx.build_chainloader_rpi()?;
             cx.flash_chainloader_rpi(device.as_str())?;
         }
-        Mode::Load => {
-            let cx = Context::new(args.target, true)?;
-            let kernel_bin_path = cx.kernel_bin_path();
-            cx.full_build_kernel()?;
+        Mode::Load { release, mon } => {
+            let cx = Context::new(args.target, release)?;
 
-            cmd!(cx.sh, "python3 ./chainload.py {kernel_bin_path}").run()?;
+            cx.full_build_kernel()?;
+            let kernel_bin_path = cx.kernel_bin_path();
+            if mon {
+                cmd!(cx.sh, "python3 ./chainload.py {kernel_bin_path} mon").run()?;
+            } else {
+                cmd!(cx.sh, "python3 ./chainload.py {kernel_bin_path}").run()?;
+            }
         }
     }
 

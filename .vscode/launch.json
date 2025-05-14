@@ -32,6 +32,19 @@
         {
             "type": "lldb",
             "request": "launch",
+            "name": "Hardware debug (aarch64)",
+            "preLaunchTask": "Chainload over USB Serial",
+            "targetCreateCommands": [
+                "target create ${workspaceFolder}/target/aarch64-kados/release/kernel",
+            ],
+            "processCreateCommands": [
+                "process connect serial:///dev/ttyUSB0?baud=921600"
+            ],
+            "stopOnEntry": true,
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
             "name": "Run QEMU (x86_64)",
             "initCommands": [
                 "platform select remote-gdb-server",

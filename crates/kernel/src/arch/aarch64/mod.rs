@@ -2,23 +2,28 @@ use core::arch::asm;
 
 use aarch64_cpu::registers::*;
 use alloc::boxed::Box;
+use debugging::gdb_active;
 use serial::PERIPHERAL_BASE;
 
 use crate::{
-    cpu_local::CpuLocalBlock, dtb::IrqChipTrait, mem::{
+    BOOT_INFO,
+    cpu_local::CpuLocalBlock,
+    dtb::IrqChipTrait,
+    mem::{
         paging::{
             allocator::KernelFrameAllocator,
             table::{BlockSize, PageFlags, PageTable, TableKind},
         },
         units::{PhysAddr, VirtAddr},
-    }, BOOT_INFO
+    },
 };
 
 use super::ArchTrait;
 
+pub mod boot;
+pub mod debugging;
 pub mod drivers;
 pub mod gic;
-pub mod boot;
 pub mod serial;
 pub mod syscall;
 pub mod task;
@@ -34,8 +39,7 @@ impl AArch64 {
     pub const PAGE_FLAG_INNER_SHAREABLE: usize = 0b11 << 8;
     pub const PAGE_FLAG_OUTER_SHAREABLE: usize = 0b10 << 8;
 
-    pub const PAGE_FLAG_DEVICE: usize =
-        Self::PAGE_FLAG_PRESENT      
+    pub const PAGE_FLAG_DEVICE: usize = Self::PAGE_FLAG_PRESENT      
             | Self::PAGE_FLAG_NON_BLOCK
             | Self::PAGE_FLAG_ACCESS 
             | (0 << 2) // AttrIdx 0
@@ -59,8 +63,7 @@ impl ArchTrait for AArch64 {
         | Self::PAGE_FLAG_NORMAL
         | Self::PAGE_FLAG_INNER_SHAREABLE;
 
-    const PAGE_FLAG_TABLE_DEFAULTS: usize =
-        Self::PAGE_FLAG_PRESENT | Self::PAGE_FLAG_NON_BLOCK;
+    const PAGE_FLAG_TABLE_DEFAULTS: usize = Self::PAGE_FLAG_PRESENT | Self::PAGE_FLAG_NON_BLOCK;
 
     const PAGE_FLAG_PRESENT: usize = 1 << 0;
 
@@ -92,7 +95,15 @@ impl ArchTrait for AArch64 {
         unsafe {
             let mut mapped = 0;
             while mapped < PERIPHERAL_SIZE {
-                mapper.map_to(page.add_bytes(mapped), frame.add_bytes(mapped), BlockSize::Page4KiB, PageFlags::from_raw(Self::PAGE_FLAG_DEVICE)).unwrap().ignore();
+                mapper
+                    .map_to(
+                        page.add_bytes(mapped),
+                        frame.add_bytes(mapped),
+                        BlockSize::Page4KiB,
+                        PageFlags::from_raw(Self::PAGE_FLAG_DEVICE),
+                    )
+                    .unwrap()
+                    .ignore();
                 mapped += BlockSize::Page4KiB.size();
             }
         };
@@ -105,7 +116,7 @@ impl ArchTrait for AArch64 {
         let fdt = boot_info.fdt.as_ref().unwrap();
 
         drivers::gpu::init(fdt);
-        drivers::usb::init(fdt);
+        // drivers::usb::init(fdt);
     }
 
     unsafe fn init_interrupts() {}
@@ -156,14 +167,7 @@ impl ArchTrait for AArch64 {
 
     #[inline(always)]
     unsafe fn invalidate_all() {
-        unsafe {
-            asm!(
-                "dsb ishst",
-                "tlbi vmalle1is",
-                "dsb ish",
-                "isb"
-                )
-        }
+        unsafe { asm!("dsb ishst", "tlbi vmalle1is", "dsb ish", "isb") }
     }
 
     #[inline(always)]
@@ -211,7 +215,6 @@ impl ArchTrait for AArch64 {
             }
         }
     }
-
 
     #[inline(always)]
     fn instruction_pointer() -> usize {
@@ -272,11 +275,19 @@ impl ArchTrait for AArch64 {
         unsafe { asm!("wfe") }
     }
 
+    #[inline(always)]
     fn nop() {
         unsafe { asm!("nop") }
     }
-}
 
+    #[inline(always)]
+    fn breakpoint() {
+        unsafe { asm!("brk #0xf000") }
+        while !gdb_active() {
+            core::hint::spin_loop();
+        }
+    }
+}
 
 pub unsafe fn clean_data_cache(addr: *const u8, len: usize) {
     let start = addr as usize & !63;

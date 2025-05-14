@@ -1,5 +1,7 @@
 use core::fmt::{self, Write};
 
+use super::debugging::gdb_active;
+
 /* -------- base addresses ------------------------------------------------ */
 
 pub const PERIPHERAL_BASE: usize = 0xFE00_0000; // BCM2711 peripheral window
@@ -98,6 +100,20 @@ impl GpioUart {
             DR.write_volatile(c as u32);
         }
     }
+
+    pub fn getchar() -> u8 {
+        unsafe {
+            loop {
+                let fr = FR.read_volatile();
+                if fr & 0x10 != 0 {
+                    core::arch::asm!("nop");
+                } else {
+                    break;
+                }
+            }
+            DR.read_volatile() as u8
+        }
+    }
 }
 
 impl Write for GpioUart {
@@ -113,7 +129,9 @@ impl Write for GpioUart {
 }
 
 pub fn write_fmt(args: fmt::Arguments) {
-    GpioUart.write_fmt(args).ok();
+    if !gdb_active() {
+        GpioUart.write_fmt(args).ok();
+    }
 }
 
 pub fn init() {

@@ -365,14 +365,11 @@ pub fn init(fdt: &Fdt) {
         .unwrap();
     flush.flush();
 
-    crate::framebuffer::init(FramebufferInfo {
+    crate::framebuffer::FRAMEBUFFER_INFO.call_once(|| FramebufferInfo {
         base: page,
         size_bytes: buffer.size as usize,
         width: phys_size.width as usize,
         height: phys_size.height as usize,
         bpp: depth.depth as usize,
     });
-
-    // PCIe
-    super::pcie::init(&mut mbox);
 }

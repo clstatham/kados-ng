@@ -17,8 +17,6 @@ use super::AArch64;
 
 pub mod gpu;
 pub mod mmio;
-pub mod pcie;
-pub mod usb;
 
 pub const DMA_SIZE: usize = AArch64::PAGE_SIZE * 32;
 static DMA_HEAP: LockedHeap<32> = LockedHeap::empty();

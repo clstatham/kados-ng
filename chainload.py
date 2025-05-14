@@ -20,18 +20,17 @@ def send_kernel(ser: serial.Serial, kernel: bytes) -> bool:
         if i < len(kernel):
             ser.write(kernel[i:])
         ser.flush()
-        ty = ser.read(4)
-        if ty == b"TY:)":
-            print("Kernel sent!")
+        print("Kernel sent!")
+        if len(sys.argv) > 2 and sys.argv[2] == "mon":
             serial_monitor(ser)
         else:
-            print(f"Error receving: {ty}")
+            sys.exit(0)
     else:
         print("Size error")
 
 
 def serial_monitor(ser: serial.Serial):
-    ser.apply_settings({"timeout": 0.1})
+    ser.apply_settings({"timeout": 0.01})
     while True:
         c = ser.read(1024)
         if c:
@@ -59,3 +58,4 @@ if __name__ == "__main__":
                     num_breaks = 0
     except KeyboardInterrupt:
         print("\nCancelled")
+        sys.exit(1)

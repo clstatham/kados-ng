@@ -1,0 +1,9 @@
+[package]
+edition.workspace = true
+name = "bootloader"
+version = "0.1.0"
+
+[lib]
+crate-type = ["staticlib"]
+
+[dependencies]

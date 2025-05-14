@@ -88,6 +88,7 @@ pub trait ArchTrait {
     fn exit_qemu(code: u32) -> !;
     fn halt();
     fn nop();
+    fn breakpoint();
 
     #[inline(always)]
     fn hcf() -> ! {

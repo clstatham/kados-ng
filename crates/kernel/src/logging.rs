@@ -47,7 +47,7 @@ impl log::Log for Logger {
         };
         let reset = "\x1b[0m"; // Reset color
         let target = record.target().split("::").last().unwrap_or("");
-        crate::serial::write_fmt(format_args!(
+        crate::arch::serial::write_fmt(format_args!(
             "{}[{}]{} [{}.{:09}] {} [{}] {}\n",
             color,
             level_str,

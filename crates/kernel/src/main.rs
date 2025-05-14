@@ -25,7 +25,6 @@ pub mod arch;
 pub mod cpu_local;
 pub mod dtb;
 pub mod logging;
-pub mod serial;
 pub mod syscall;
 pub mod task;
 pub mod time;
@@ -139,9 +138,14 @@ pub(crate) fn kernel_main() -> ! {
         Arch::init_drivers();
     }
 
+    log::info!("initializing framebuffer...");
+    crate::framebuffer::init();
+
     unsafe {
         Arch::disable_interrupts();
     }
+
+    // Arch::breakpoint();
 
     log::info!("initializing task contexts...");
     task::context::init();
@@ -179,7 +183,7 @@ extern "C" fn test() {
 #[macro_export]
 macro_rules! print {
     ($($arg:tt)*) => ({
-        let _ = $crate::serial::write_fmt(format_args!($($arg)*));
+        let _ = $crate::arch::serial::write_fmt(format_args!($($arg)*));
         let _ = $crate::framebuffer::write_fmt(format_args!($($arg)*));
     });
 }
@@ -187,19 +191,19 @@ macro_rules! print {
 #[macro_export]
 macro_rules! serial_print {
     ($($arg:tt)*) => {
-        let _ = $crate::serial::write_fmt(format_args!($($arg)*));
+        let _ = $crate::arch::serial::write_fmt(format_args!($($arg)*));
     };
 }
 
 #[macro_export]
 macro_rules! println {
     () => ({
-        let _ = $crate::serial::write_fmt(format_args!("\n"));
+        let _ = $crate::arch::serial::write_fmt(format_args!("\n"));
         let _ = $crate::framebuffer::write_fmt(format_args!("\n"));
     });
     ($($arg:tt)*) => ({
-        let _ = $crate::serial::write_fmt(format_args!($($arg)*));
-        let _ = $crate::serial::write_fmt(format_args!("\n"));
+        let _ = $crate::arch::serial::write_fmt(format_args!($($arg)*));
+        let _ = $crate::arch::serial::write_fmt(format_args!("\n"));
         let _ = $crate::framebuffer::write_fmt(format_args!($($arg)*));
         let _ = $crate::framebuffer::write_fmt(format_args!("\n"));
     });
@@ -207,10 +211,10 @@ macro_rules! println {
 #[macro_export]
 macro_rules! serial_println {
     () => ({
-        let _ = $crate::serial::write_fmt(format_args!("\n"));
+        let _ = $crate::arch::serial::write_fmt(format_args!("\n"));
     });
     ($($arg:tt)*) => ({
-        let _ = $crate::serial::write_fmt(format_args!($($arg)*));
-        let _ = $crate::serial::write_fmt(format_args!("\n"));
+        let _ = $crate::arch::serial::write_fmt(format_args!($($arg)*));
+        let _ = $crate::arch::serial::write_fmt(format_args!("\n"));
     });
 }

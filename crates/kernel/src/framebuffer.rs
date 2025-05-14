@@ -329,14 +329,19 @@ pub struct FramebufferInfo {
     pub bpp: usize,
 }
 
-pub fn init(fb_tag: FramebufferInfo) {
-    let FramebufferInfo {
+pub static FRAMEBUFFER_INFO: Once<FramebufferInfo> = Once::new();
+
+pub fn init() {
+    let Some(FramebufferInfo {
         base,
         size_bytes,
         width,
         height,
         bpp,
-    } = fb_tag;
+    }) = FRAMEBUFFER_INFO.get().copied()
+    else {
+        return;
+    };
 
     let framebuf = FrameBuffer {
         start_addr: base,
