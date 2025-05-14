@@ -30,17 +30,25 @@
             ]
         },
         {
-            "type": "lldb",
+            "name": "Hardware Debug (aarch64)",
+            "type": "cppdbg",
             "request": "launch",
-            "name": "Hardware debug (aarch64)",
-            "preLaunchTask": "Chainload over USB Serial",
-            "targetCreateCommands": [
-                "target create ${workspaceFolder}/target/aarch64-kados/release/kernel",
+            "program": "${workspaceFolder}/target/aarch64-kados/debug/kernel",
+            "miDebuggerPath": "aarch64-none-elf-gdb",
+            "miDebuggerArgs": "--baud 921600",
+            "miDebuggerServerAddress": "/dev/ttyUSB0",
+            "MIMode": "gdb",
+            "stopAtEntry": true,
+            "cwd": "${workspaceFolder}",
+            "externalConsole": false,
+            "setupCommands": [
+                {
+                    "description": "Set serial baud rate",
+                    "text": "set remotebaud 921600",
+                    "ignoreFailures": false
+                }
             ],
-            "processCreateCommands": [
-                "process connect serial:///dev/ttyUSB0?baud=921600"
-            ],
-            "stopOnEntry": true,
+            "preLaunchTask": "Chainload over USB Serial"
         },
         {
             "type": "lldb",

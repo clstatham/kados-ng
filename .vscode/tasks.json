@@ -10,7 +10,6 @@
                 "xtask",
                 "--target=aarch64",
                 "load",
-                "--release"
             ],
             "group": {
                 "kind": "build",

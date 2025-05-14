@@ -37,7 +37,7 @@ pub enum Mode {
         #[clap(short, long, default_value_t = false)]
         release: bool,
         #[clap(long, default_value_t = false)]
-        mon: bool,
+        monitor: bool,
     },
 }
 
@@ -142,6 +142,10 @@ impl Context {
         self.kernel_elf_path().with_extension("bin")
     }
 
+    pub fn kernel_sym_path(&self) -> PathBuf {
+        self.kernel_elf_path().with_extension("sym")
+    }
+
     pub fn chainloader_elf_path(&self) -> PathBuf {
         self.target_dir().join("chainloader")
     }
@@ -229,9 +233,17 @@ impl Context {
 
         let kernel_elf_path = self.kernel_elf_path();
         let kernel_bin_path = self.kernel_bin_path();
+        let kernel_sym_path = self.kernel_sym_path();
+
         cmd!(
             self.sh,
-            "llvm-objcopy -O binary {kernel_elf_path} {kernel_bin_path}"
+            "llvm-objcopy --only-keep-debug {kernel_elf_path} {kernel_sym_path}"
+        )
+        .run()?;
+
+        cmd!(
+            self.sh,
+            "llvm-objcopy -O binary --strip-all {kernel_elf_path} {kernel_bin_path}"
         )
         .run()?;
 
@@ -440,13 +452,21 @@ fn main() -> anyhow::Result<()> {
             cx.build_chainloader_rpi()?;
             cx.flash_chainloader_rpi(device.as_str())?;
         }
-        Mode::Load { release, mon } => {
+        Mode::Load {
+            release,
+            monitor: mon,
+        } => {
             let cx = Context::new(args.target, release)?;
 
             cx.full_build_kernel()?;
             let kernel_bin_path = cx.kernel_bin_path();
+            let kernel_sym_path = cx.kernel_sym_path();
             if mon {
-                cmd!(cx.sh, "python3 ./chainload.py {kernel_bin_path} mon").run()?;
+                cmd!(
+                    cx.sh,
+                    "python3 ./chainload.py {kernel_bin_path} --monitor --sym {kernel_sym_path}"
+                )
+                .run()?;
             } else {
                 cmd!(cx.sh, "python3 ./chainload.py {kernel_bin_path}").run()?;
             }

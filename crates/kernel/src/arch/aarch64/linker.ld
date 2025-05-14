@@ -63,7 +63,7 @@ SECTIONS
         *(EXCLUDE_FILE (libbootloader.a) .data*)
 	. = ALIGN(4096);
         __stack_bottom = .;
-    . += 0x20000;
+    . += 64K;
         __stack_top = .;
     . = ALIGN(4096);
         __data_end = .;

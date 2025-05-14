@@ -10,6 +10,7 @@ path = "src/main.rs"
 test = false
 
 [dependencies]
+arrayvec = {version = "*", default-features = false}
 bitflags = "2.9.0"
 bitvec = {version = "1.0", default-features = false}
 buddy_system_allocator = "0.11.0"

@@ -16,8 +16,8 @@ use mem::paging::{
     MemMapEntries,
     allocator::{init_kernel_frame_allocator, kernel_frame_allocator},
 };
+use panicking::symbol_name;
 use spin::Once;
-use xmas_elf::ElfFile;
 
 extern crate alloc;
 
@@ -44,11 +44,8 @@ pub struct BootInfo {
 
 pub static BOOT_INFO: Once<BootInfo> = Once::new();
 
-static KERNEL_ELF: Once<ElfFile<'static>> = Once::new();
-
 pub const HHDM_PHYSICAL_OFFSET: usize = 0xffff_8000_0000_0000;
 pub const KERNEL_OFFSET: usize = 0xffff_ffff_8000_0000; // must match linker.ld
-pub const KERNEL_STACK_SIZE: usize = 1024 * 1024 * 2;
 
 macro_rules! elf_offsets {
     ($($name:ident),* $(,)?) => {
@@ -131,8 +128,6 @@ pub(crate) extern "C" fn kernel_main() -> ! {
     log::info!("initializing timer...");
     arch::time::init(fdt);
 
-    unsafe { Arch::enable_interrupts() };
-
     log::info!("running init hooks (post-heap)...");
     unsafe {
         Arch::init_drivers();
@@ -140,10 +135,6 @@ pub(crate) extern "C" fn kernel_main() -> ! {
 
     log::info!("initializing framebuffer...");
     crate::framebuffer::init();
-
-    unsafe {
-        Arch::disable_interrupts();
-    }
 
     log::info!("initializing task contexts...");
     task::context::init();

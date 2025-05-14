@@ -525,7 +525,11 @@ impl PageFlags {
     }
 
     pub const fn new_for_text_segment() -> Self {
-        Self::new().executable().writable()
+        if cfg!(debug_assertions) {
+            Self::new().executable().writable() // for inserting breakpoints
+        } else {
+            Self::new().executable()
+        }
     }
 
     pub fn new_for_rodata_segment() -> Self {

@@ -335,7 +335,7 @@ pub fn exception_code(esr: usize) -> u8 {
 }
 
 exception_stack!(__sync_current_el_sp0, |stack| {
-    super::debugging::init_gdb_stub(stack);
+    super::debugging::enter_gdb_stub(stack);
 
     stack.dump();
     panic!("{}", stringify!(__sync_current_el_sp0))
@@ -371,7 +371,7 @@ exception_stack!(__sync_current_el_spx, |stack| {
             _ => unhandled_fault(faulted_addr, wn_r, dfsc),
         }
     } else if error_code == 0x3c {
-        super::debugging::init_gdb_stub(stack);
+        super::debugging::enter_gdb_stub(stack);
         return;
     }
 

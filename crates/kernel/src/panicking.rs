@@ -1,14 +1,13 @@
-use core::sync::atomic::{AtomicBool, Ordering};
-
-use thiserror::Error;
-use xmas_elf::{
-    sections::{SectionData, ShType},
-    symbol_table::Entry,
+use core::{
+    fmt::Write,
+    sync::atomic::{AtomicBool, Ordering},
 };
 
+use arrayvec::ArrayString;
+use thiserror::Error;
+
 use crate::{
-    KERNEL_ELF,
-    arch::{Arch, ArchTrait},
+    arch::{Arch, ArchTrait, serial::GpioUart},
     mem::{
         paging::table::{PageTable, TableKind},
         units::VirtAddr,
@@ -50,27 +49,6 @@ pub enum UnwindStackError {
 
 #[inline(always)]
 pub fn unwind_kernel_stack() -> Result<(), UnwindStackError> {
-    let kernel_elf = KERNEL_ELF
-        .get()
-        .ok_or(UnwindStackError::KernelElfNotInitialized)?;
-
-    let mut symtab = None;
-
-    for section in kernel_elf.section_iter() {
-        if section.get_type() == Ok(ShType::SymTab) {
-            let section_data = section
-                .get_data(kernel_elf)
-                .map_err(|_| UnwindStackError::FailedToGetSectionData)?;
-
-            if let SectionData::SymbolTable64(s) = section_data {
-                symtab = Some(s);
-                break;
-            }
-        }
-    }
-
-    let symtab = symtab.ok_or(UnwindStackError::NoSymbolTable)?;
-
     let mut fp = Arch::frame_pointer();
     let mut pc_ptr_opt = fp
         .checked_add(size_of::<usize>())
@@ -100,19 +78,20 @@ pub fn unwind_kernel_stack() -> Result<(), UnwindStackError> {
                     break;
                 } else {
                     println!("{:>2}: FP={} PC={}", depth, fp_va, pc_va);
-                    let mut name = None;
-                    for entry in symtab.iter() {
-                        let value = entry.value() as usize;
-                        let size = entry.size() as usize;
+                    // let mut name = None;
+                    // for entry in symtab.iter() {
+                    //     let value = entry.value() as usize;
+                    //     let size = entry.size() as usize;
 
-                        if pc >= value && pc < (value + size) {
-                            name = entry.get_name(kernel_elf).ok();
-                            break;
-                        }
-                    }
+                    //     if pc >= value && pc < (value + size) {
+                    //         name = entry.get_name(kernel_elf).ok();
+                    //         break;
+                    //     }
+                    // }
+                    let name = symbol_name(pc);
 
                     if let Some(name) = name {
-                        println!("       {}", rustc_demangle::demangle(name));
+                        println!("       {}", rustc_demangle::demangle(&name));
                     } else {
                         println!("       <unknown>");
                     }
@@ -133,4 +112,24 @@ pub fn unwind_kernel_stack() -> Result<(), UnwindStackError> {
     println!("---END BACKTRACE---");
 
     Ok(())
+}
+
+pub fn symbol_name(addr: usize) -> Option<ArrayString<4096>> {
+    GpioUart.write_fmt(format_args!("\n[sym]{}\n", addr)).ok()?;
+    let mut out = ArrayString::new();
+    loop {
+        let b = GpioUart::getchar();
+        if b == b'\n' {
+            break;
+        }
+        if let Ok(s) = str::from_utf8(&[b]) {
+            if out.try_push_str(s).is_err() {
+                break;
+            }
+        } else {
+            break;
+        }
+    }
+
+    Some(out)
 }

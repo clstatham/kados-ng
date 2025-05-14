@@ -55,10 +55,12 @@ pub unsafe extern "C" fn boot_higher_half(dtb_ptr: *const u8) -> ! {
         super::serial::init();
         let bss_start = &__bss_start as *const u8 as usize;
         let bss_end = &__bss_end as *const u8 as usize;
+
+        println!();
+
         println!("zeroing BSS 0x{:016x} .. 0x{:016x}", bss_start, bss_end);
         memzero(bss_start, bss_end);
 
-        println!();
         println!("parsing FDT");
         let fdt = Fdt::from_ptr(dtb_ptr).unwrap();
         let mut mem_map = MemMapEntries::new();

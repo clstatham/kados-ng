@@ -1,4 +1,4 @@
-use core::alloc::Layout;
+use core::{alloc::Layout, ptr::NonNull};
 
 use buddy_system_allocator::LockedHeap;
 
@@ -49,10 +49,18 @@ pub fn dma_init(mapper: &mut PageTable) {
     };
 }
 
-pub unsafe fn dma_alloc(bytes: usize) -> *mut u8 {
+pub fn dma_alloc<T>() -> *mut T {
+    assert_eq!(align_of::<T>() % 16, 0);
     DMA_HEAP
         .lock()
-        .alloc(unsafe { Layout::from_size_align_unchecked(bytes, 16) })
+        .alloc(Layout::new::<T>())
         .unwrap()
         .as_ptr()
+        .cast()
+}
+
+pub fn dma_free<T>(t: *mut T) {
+    DMA_HEAP
+        .lock()
+        .dealloc(NonNull::new(t).unwrap().cast(), Layout::new::<T>());
 }

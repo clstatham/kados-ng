@@ -1,4 +1,7 @@
-use core::sync::atomic::{AtomicBool, Ordering};
+use core::{
+    arch::asm,
+    sync::atomic::{AtomicBool, Ordering},
+};
 
 use alloc::collections::btree_map::BTreeMap;
 use gdbstub::{
@@ -11,7 +14,7 @@ use gdbstub::{
             base::{
                 BaseOps,
                 single_register_access::SingleRegisterAccessOps,
-                singlethread::{SingleThreadBase, SingleThreadResumeOps},
+                singlethread::{SingleThreadBase, SingleThreadResume, SingleThreadResumeOps},
             },
             breakpoints::{Breakpoints, BreakpointsOps, SwBreakpoint, SwBreakpointOps},
         },
@@ -19,10 +22,11 @@ use gdbstub::{
 };
 use gdbstub_arch::aarch64::AArch64;
 
-use crate::arch::vectors::InterruptFrame;
+use crate::{arch::vectors::InterruptFrame, pop_preserved, pop_scratch, pop_special};
 
 pub static GDB_ACTIVE: AtomicBool = AtomicBool::new(false);
 
+#[inline(always)]
 pub fn gdb_active() -> bool {
     GDB_ACTIVE.load(Ordering::SeqCst)
 }
@@ -213,7 +217,7 @@ impl<'a> SingleThreadBase for InterruptTarget<'a> {
     }
 
     fn support_resume(&mut self) -> Option<SingleThreadResumeOps<'_, Self>> {
-        None
+        Some(self)
     }
 
     fn support_single_register_access(&mut self) -> Option<SingleRegisterAccessOps<'_, (), Self>> {
@@ -221,7 +225,17 @@ impl<'a> SingleThreadBase for InterruptTarget<'a> {
     }
 }
 
-pub fn init_gdb_stub(frame: &mut InterruptFrame) {
+impl SingleThreadResume for InterruptTarget<'_> {
+    fn resume(&mut self, _signal: Option<gdbstub::common::Signal>) -> Result<(), Self::Error> {
+        unsafe {
+            asm!(pop_special!(), pop_scratch!(), pop_preserved!(), "eret\n");
+        }
+
+        Ok(())
+    }
+}
+
+pub fn enter_gdb_stub(frame: &mut InterruptFrame) {
     if GDB_ACTIVE
         .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
         .is_err()

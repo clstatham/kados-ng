@@ -2,7 +2,6 @@ use core::arch::asm;
 
 use aarch64_cpu::registers::*;
 use alloc::boxed::Box;
-use debugging::gdb_active;
 use serial::PERIPHERAL_BASE;
 
 use crate::{
@@ -219,7 +218,7 @@ impl ArchTrait for AArch64 {
     fn instruction_pointer() -> usize {
         let pc: usize;
         unsafe {
-            core::arch::asm!("mov {}, pc", out(reg) pc);
+            asm!("mov {}, pc", out(reg) pc);
         }
         pc
     }
@@ -228,7 +227,7 @@ impl ArchTrait for AArch64 {
     fn stack_pointer() -> usize {
         let sp: usize;
         unsafe {
-            core::arch::asm!("mov {}, sp", out(reg) sp);
+            asm!("mov {}, sp", out(reg) sp);
         }
         sp
     }
@@ -237,7 +236,7 @@ impl ArchTrait for AArch64 {
     fn frame_pointer() -> usize {
         let fp: usize;
         unsafe {
-            core::arch::asm!("mov {}, fp", out(reg) fp);
+            asm!("mov {}, fp", out(reg) fp);
         }
         fp
     }
@@ -282,9 +281,6 @@ impl ArchTrait for AArch64 {
     #[inline(always)]
     fn breakpoint() {
         unsafe { asm!("brk #0xf000") }
-        while !gdb_active() {
-            core::hint::spin_loop();
-        }
     }
 }
 

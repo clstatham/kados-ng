@@ -19,7 +19,7 @@ use crate::{
 use crate::arch::Arch;
 use props::*;
 
-use super::dma_alloc;
+use super::{dma_alloc, dma_free};
 
 pub mod props;
 
@@ -68,8 +68,8 @@ impl MailboxMessage {
         Self(raw)
     }
 
-    pub fn decode(self) -> *const MailboxBuffer {
-        ((self.payload() as usize) + crate::HHDM_PHYSICAL_OFFSET) as *const MailboxBuffer
+    pub fn decode(self) -> *mut MailboxBuffer {
+        ((self.payload() as usize) + crate::HHDM_PHYSICAL_OFFSET) as *mut MailboxBuffer
     }
 
     pub fn channel(&self) -> MailboxChannel {
@@ -132,22 +132,7 @@ pub struct MailboxRequest {
 
 impl MailboxRequest {
     pub fn new() -> MailboxRequest {
-        // let frame = unsafe {
-        //     KernelFrameAllocator.allocate(FrameCount::from_bytes(size_of::<MailboxBuffer>()))
-        // }
-        // .unwrap();
-        // let mut mapper = PageTable::current(TableKind::Kernel);
-        // mapper
-        //     .kernel_map_range(
-        //         frame.as_identity_virt(),
-        //         frame,
-        //         size_of::<MailboxBuffer>(),
-        //         PageFlags::new_device(),
-        //     )
-        //     .unwrap()
-        //     .flush();
-
-        let buf = unsafe { dma_alloc(size_of::<MailboxBuffer>()).cast() };
+        let buf = dma_alloc::<MailboxBuffer>();
 
         MailboxRequest { buf, index: 2 }
     }
@@ -188,7 +173,7 @@ impl MailboxRequest {
 }
 
 pub struct MailboxResponse {
-    buf: *const MailboxBuffer,
+    buf: *mut MailboxBuffer,
 }
 
 impl MailboxResponse {
@@ -210,7 +195,7 @@ impl MailboxResponse {
     }
 
     pub fn recycle(self) -> MailboxRequest {
-        let buf = self.buf.cast_mut();
+        let buf = self.buf;
         unsafe {
             (*buf).fill(0);
         }
@@ -218,14 +203,11 @@ impl MailboxResponse {
     }
 }
 
-// impl Drop for MailboxResponse {
-//     fn drop(&mut self) {
-//         let addr = VirtAddr::new_canonical(self.buf as usize).as_hhdm_phys();
-//         KernelFrameAllocator
-//             .free(addr, FrameCount::from_bytes(size_of::<MailboxBuffer>()))
-//             .unwrap();
-//     }
-// }
+impl Drop for MailboxResponse {
+    fn drop(&mut self) {
+        dma_free(self.buf);
+    }
+}
 
 #[derive(Debug)]
 pub struct Mailbox {
