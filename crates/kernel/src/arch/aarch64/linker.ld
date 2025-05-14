@@ -62,16 +62,17 @@ SECTIONS
         __data_start = .;
         *(EXCLUDE_FILE (libbootloader.a) .data*)
 	. = ALIGN(4096);
-        __data_end = .;
-    } : kernel
-
-    .bss (NOLOAD) : ALIGN(4K) {
-        __bss_start = .;
-        *(EXCLUDE_FILE (libbootloader.a) .bss* COMMON)
-	. = ALIGN(4096);
         __stack_bottom = .;
     . += 0x20000;
         __stack_top = .;
+    . = ALIGN(4096);
+        __data_end = .;
+    } : kernel
+
+    .bss (NOLOAD) : AT(__kernel_phys_start + SIZEOF(.text) + SIZEOF(.rodata) + SIZEOF(.data)) {
+        __bss_start = .;
+        *(EXCLUDE_FILE (libbootloader.a) .bss* COMMON)
+    . = ALIGN(4096);
         __bss_end = .;
     }
     __kernel_virt_end = .;

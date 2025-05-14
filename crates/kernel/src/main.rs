@@ -145,8 +145,6 @@ pub(crate) extern "C" fn kernel_main() -> ! {
         Arch::disable_interrupts();
     }
 
-    // Arch::breakpoint();
-
     log::info!("initializing task contexts...");
     task::context::init();
 

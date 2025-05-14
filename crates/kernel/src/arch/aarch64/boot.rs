@@ -18,16 +18,18 @@ unsafe extern "C" {
     unsafe static __kernel_phys_start: u8;
     unsafe static __kernel_phys_end: u8;
     unsafe static __kernel_virt_start: u8;
+    unsafe static __bss_start: u8;
+    unsafe static __bss_end: u8;
     unsafe static __kernel_virt_end: u8;
+
 }
 
-unsafe fn clear_bss() {
+unsafe fn memzero(start: usize, end: usize) {
     unsafe {
         asm!(
             "
-
-        ldr x1, =__bss_start
-        ldr x2, =__bss_end
+        mov x1, {start}
+        mov x2, {end}
         mov x3, xzr
     1:
         cmp x1, x2
@@ -35,7 +37,11 @@ unsafe fn clear_bss() {
         str x3, [x1], #8
         b 1b
     2:
+        dsb sy
+        isb
         ",
+        start = in(reg) start,
+        end = in(reg) end,
         out("x1") _,
         out("x2") _,
         out("x3") _,
@@ -46,8 +52,12 @@ unsafe fn clear_bss() {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn boot_higher_half(dtb_ptr: *const u8) -> ! {
     unsafe {
-        clear_bss();
         super::serial::init();
+        let bss_start = &__bss_start as *const u8 as usize;
+        let bss_end = &__bss_end as *const u8 as usize;
+        println!("zeroing BSS 0x{:016x} .. 0x{:016x}", bss_start, bss_end);
+        memzero(bss_start, bss_end);
+
         println!();
         println!("parsing FDT");
         let fdt = Fdt::from_ptr(dtb_ptr).unwrap();

@@ -100,7 +100,7 @@ impl ArchTrait for AArch64 {
                         page.add_bytes(mapped),
                         frame.add_bytes(mapped),
                         BlockSize::Page4KiB,
-                        PageFlags::from_raw(Self::PAGE_FLAG_DEVICE),
+                        PageFlags::new_device(),
                     )
                     .unwrap()
                     .ignore();
@@ -116,7 +116,6 @@ impl ArchTrait for AArch64 {
         let fdt = boot_info.fdt.as_ref().unwrap();
 
         drivers::gpu::init(fdt);
-        // drivers::usb::init(fdt);
     }
 
     unsafe fn init_interrupts() {}

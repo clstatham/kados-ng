@@ -525,7 +525,7 @@ impl PageFlags {
     }
 
     pub const fn new_for_text_segment() -> Self {
-        Self::new().executable()
+        Self::new().executable().writable()
     }
 
     pub fn new_for_rodata_segment() -> Self {

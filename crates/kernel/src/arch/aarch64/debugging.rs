@@ -1,12 +1,20 @@
 use core::sync::atomic::{AtomicBool, Ordering};
 
+use alloc::collections::btree_map::BTreeMap;
 use gdbstub::{
     arch::Arch,
     conn::{Connection, ConnectionExt},
     stub::{GdbStub, SingleThreadStopReason, state_machine::GdbStubStateMachine},
     target::{
         Target, TargetResult,
-        ext::base::{BaseOps, singlethread::SingleThreadBase},
+        ext::{
+            base::{
+                BaseOps,
+                single_register_access::SingleRegisterAccessOps,
+                singlethread::{SingleThreadBase, SingleThreadResumeOps},
+            },
+            breakpoints::{Breakpoints, BreakpointsOps, SwBreakpoint, SwBreakpointOps},
+        },
     },
 };
 use gdbstub_arch::aarch64::AArch64;
@@ -50,14 +58,52 @@ impl ConnectionExt for Serial {
 
 pub struct InterruptTarget<'a> {
     frame: &'a mut InterruptFrame,
+    breakpoints: BTreeMap<u64, u64>,
 }
 
-impl<'a> Target for InterruptTarget<'a> {
+impl Target for InterruptTarget<'_> {
     type Arch = AArch64;
     type Error = &'static str;
 
     fn base_ops(&mut self) -> BaseOps<'_, Self::Arch, Self::Error> {
         BaseOps::SingleThread(self)
+    }
+
+    fn support_breakpoints(&mut self) -> Option<BreakpointsOps<'_, Self>> {
+        Some(self)
+    }
+}
+
+impl Breakpoints for InterruptTarget<'_> {
+    fn support_sw_breakpoint(&mut self) -> Option<SwBreakpointOps<'_, Self>> {
+        Some(self)
+    }
+}
+
+impl SwBreakpoint for InterruptTarget<'_> {
+    fn add_sw_breakpoint(
+        &mut self,
+        addr: <Self::Arch as Arch>::Usize,
+        _kind: <Self::Arch as Arch>::BreakpointKind,
+    ) -> TargetResult<bool, Self> {
+        unsafe {
+            let original = (addr as *const u64).read_volatile();
+            self.breakpoints.insert(addr, original);
+            (addr as *mut u64).write_volatile(0xD43C0000); // brk #0xf000
+        }
+        Ok(true)
+    }
+
+    fn remove_sw_breakpoint(
+        &mut self,
+        addr: <Self::Arch as Arch>::Usize,
+        _kind: <Self::Arch as Arch>::BreakpointKind,
+    ) -> TargetResult<bool, Self> {
+        unsafe {
+            let original = self.breakpoints.remove(&addr).unwrap();
+            (addr as *mut u64).write_volatile(original);
+        }
+        Ok(true)
     }
 }
 
@@ -165,6 +211,14 @@ impl<'a> SingleThreadBase for InterruptTarget<'a> {
         slc.copy_from_slice(data);
         Ok(())
     }
+
+    fn support_resume(&mut self) -> Option<SingleThreadResumeOps<'_, Self>> {
+        None
+    }
+
+    fn support_single_register_access(&mut self) -> Option<SingleRegisterAccessOps<'_, (), Self>> {
+        None
+    }
 }
 
 pub fn init_gdb_stub(frame: &mut InterruptFrame) {
@@ -176,7 +230,12 @@ pub fn init_gdb_stub(frame: &mut InterruptFrame) {
         return;
     }
 
-    let stub = match GdbStub::builder(Serial).build() {
+    let mut buffer = [0u8; 4096];
+
+    let stub = match GdbStub::builder(Serial)
+        .with_packet_buffer(&mut buffer)
+        .build()
+    {
         Ok(stub) => stub,
         Err(e) => {
             GDB_ACTIVE.store(false, Ordering::SeqCst);
@@ -186,7 +245,10 @@ pub fn init_gdb_stub(frame: &mut InterruptFrame) {
         }
     };
 
-    let mut target = InterruptTarget { frame };
+    let mut target = InterruptTarget {
+        frame,
+        breakpoints: Default::default(),
+    };
 
     let mut gdb = match stub.run_state_machine(&mut target) {
         Ok(gdb) => gdb,

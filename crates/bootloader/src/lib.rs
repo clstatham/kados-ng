@@ -232,7 +232,7 @@ pub unsafe extern "C" fn boot_el2(dtb_ptr: *const u8) -> ! {
 #[inline(always)]
 pub fn alloc_table(off: &mut usize) -> &'static mut Table {
     let table = unsafe { &mut *(*off as *mut Table) };
-    memzero(table as *mut Table as *mut u8, size_of::<Table>());
+    // memzero(table as *mut Table as *mut u8, size_of::<Table>());
     *off += size_of::<Table>();
     table
 }
