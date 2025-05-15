@@ -1,6 +1,11 @@
 [package]
-edition.workspace = true
+edition = "2024"
 name = "chainloader"
 version = "0.1.0"
+
+[[bin]]
+name = "chainloader"
+test = false
+
 
 [dependencies]

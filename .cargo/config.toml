@@ -1,2 +1,3 @@
 [alias]
-xtask = "run --package xtask --"
+builder = "run --package builder --release --"
+loader = "run --package loader --release --"

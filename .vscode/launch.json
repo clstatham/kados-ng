@@ -35,20 +35,12 @@
             "request": "launch",
             "program": "${workspaceFolder}/target/aarch64-kados/debug/kernel",
             "miDebuggerPath": "aarch64-none-elf-gdb",
-            "miDebuggerArgs": "--baud 921600",
-            "miDebuggerServerAddress": "/dev/ttyUSB0",
+            "miDebuggerServerAddress": "127.0.0.1:1234",
             "MIMode": "gdb",
             "stopAtEntry": true,
             "cwd": "${workspaceFolder}",
             "externalConsole": false,
-            "setupCommands": [
-                {
-                    "description": "Set serial baud rate",
-                    "text": "set remotebaud 921600",
-                    "ignoreFailures": false
-                }
-            ],
-            "preLaunchTask": "Chainload over USB Serial"
+            "setupCommands": [],
         },
         {
             "type": "lldb",

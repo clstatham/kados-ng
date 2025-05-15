@@ -16,7 +16,6 @@ use mem::paging::{
     MemMapEntries,
     allocator::{init_kernel_frame_allocator, kernel_frame_allocator},
 };
-use panicking::symbol_name;
 use spin::Once;
 
 extern crate alloc;
@@ -159,9 +158,11 @@ welcome to...
 "#
     );
 
+    Arch::breakpoint();
+
     unsafe { Arch::enable_interrupts() }
 
-    Arch::hcf();
+    Arch::hcf()
 }
 
 extern "C" fn test() {

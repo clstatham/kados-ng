@@ -36,8 +36,6 @@ pub enum Mode {
     Load {
         #[clap(short, long, default_value_t = false)]
         release: bool,
-        #[clap(long, default_value_t = false)]
-        monitor: bool,
     },
 }
 
@@ -47,30 +45,6 @@ pub struct Args {
     /// Mode of operation
     #[command(subcommand)]
     mode: Mode,
-
-    /// Target to build for
-    #[clap(long)]
-    target: Target,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
-pub enum Target {
-    #[clap(name = "aarch64")]
-    AArch64,
-}
-
-impl Target {
-    pub fn target_dir(&self) -> &'static str {
-        match self {
-            Self::AArch64 => "aarch64-kados",
-        }
-    }
-
-    pub fn arch_dir(&self) -> PathBuf {
-        match self {
-            Self::AArch64 => PathBuf::from("arch").join("aarch64"),
-        }
-    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -90,16 +64,14 @@ impl Display for Profile {
 
 pub struct Context {
     sh: Shell,
-    target: Target,
     profile: Profile,
     build_root: PathBuf,
 }
 
 impl Context {
-    pub fn new(target: Target, release: bool) -> anyhow::Result<Self> {
+    pub fn new(release: bool) -> anyhow::Result<Self> {
         Ok(Self {
             sh: Shell::new()?,
-            target,
             profile: if release {
                 Profile::Release
             } else {
@@ -109,6 +81,8 @@ impl Context {
                 .parse::<PathBuf>()?
                 .parent()
                 .unwrap()
+                .parent()
+                .unwrap()
                 .to_path_buf(),
         })
     }
@@ -116,18 +90,16 @@ impl Context {
     pub fn target_dir(&self) -> PathBuf {
         self.build_root
             .join("target")
-            .join(self.target.target_dir())
+            .join("aarch64-kados")
             .join(self.profile.to_string())
     }
 
     pub fn arch_dir(&self) -> PathBuf {
-        self.target.arch_dir()
+        self.build_root.join("arch").join("aarch64")
     }
 
     pub fn target_json_path(&self) -> PathBuf {
-        self.arch_dir()
-            .join(self.target.target_dir())
-            .with_extension("json")
+        self.arch_dir().join("aarch64-kados.json")
     }
 
     pub fn bootloader_elf_path(&self) -> PathBuf {
@@ -159,7 +131,8 @@ impl Context {
             .join("crates")
             .join(module)
             .join("src")
-            .join(self.target.arch_dir())
+            .join("arch")
+            .join("aarch64")
             .join("linker.ld")
     }
 
@@ -274,20 +247,20 @@ impl Context {
     }
 
     pub fn flash_chainloader_rpi(&self, device: &str) -> anyhow::Result<()> {
-        log::info!("Copying chainlaoder to SD card device {device} (will sudo)");
+        log::info!("Copying chainloader to SD card device {device} (will sudo)");
         let chainloader_bin_path = self.chainloader_bin_path();
 
         cmd!(self.sh, "sudo umount {device}")
             .ignore_status()
             .run()?;
 
+        self.copy_common(device)?;
+
         cmd!(
             self.sh,
             "sudo cp {chainloader_bin_path} /mnt/rpi-sd/kernel8.img"
         )
         .run()?;
-
-        self.copy_common(device)?;
 
         cmd!(self.sh, "sudo umount {device}").run()?;
 
@@ -426,50 +399,42 @@ fn main() -> anyhow::Result<()> {
 
     match args.mode {
         Mode::Build { release } => {
-            let cx = Context::new(args.target, release)?;
+            let cx = Context::new(release)?;
             cx.full_build_kernel()?;
         }
         Mode::Debug { release } => {
-            let cx = Context::new(args.target, release)?;
+            let cx = Context::new(release)?;
             cx.full_build_kernel()?;
             cx.build_dependencies_rpi()?;
             cx.run_qemu_rpi(true)?;
         }
         Mode::Run { release } => {
-            let cx = Context::new(args.target, release)?;
+            let cx = Context::new(release)?;
             cx.full_build_kernel()?;
             cx.build_dependencies_rpi()?;
             cx.run_qemu_rpi(false)?;
         }
         Mode::Flash { device, release } => {
-            let cx = Context::new(args.target, release)?;
+            let cx = Context::new(release)?;
             cx.full_build_kernel()?;
             cx.build_dependencies_rpi()?;
             cx.flash_kernel_rpi(device.as_str())?;
         }
         Mode::FlashChainloader { device } => {
-            let cx = Context::new(args.target, true)?;
+            let cx = Context::new(true)?;
             cx.build_chainloader_rpi()?;
             cx.flash_chainloader_rpi(device.as_str())?;
         }
-        Mode::Load {
-            release,
-            monitor: mon,
-        } => {
-            let cx = Context::new(args.target, release)?;
-
+        Mode::Load { release } => {
+            let cx = Context::new(release)?;
             cx.full_build_kernel()?;
             let kernel_bin_path = cx.kernel_bin_path();
             let kernel_sym_path = cx.kernel_sym_path();
-            if mon {
-                cmd!(
-                    cx.sh,
-                    "python3 ./chainload.py {kernel_bin_path} --monitor --sym {kernel_sym_path}"
-                )
-                .run()?;
-            } else {
-                cmd!(cx.sh, "python3 ./chainload.py {kernel_bin_path}").run()?;
-            }
+            cmd!(
+                cx.sh,
+                "cargo loader client {kernel_bin_path} --symbol-path {kernel_sym_path}"
+            )
+            .run()?;
         }
     }
 

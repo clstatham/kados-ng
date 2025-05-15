@@ -194,6 +194,16 @@ pub unsafe extern "C" fn boot_el2(dtb_ptr: *const u8) -> ! {
             "msr    hcr_el2, x0",
             "isb",
 
+            // Unlock debug registers
+            "mov    x0, #0",
+            "msr    oslar_el1, x0",
+
+            // Turn on monitor debug
+            "mrs    x0, mdscr_el1",
+            "orr    x0, x0, #(1<<15)",
+            "bic    x0, x0, #(1<<13)",
+            "msr    mdscr_el1, x0",
+
             // Set up stack
             "ldr    x0, =__stack_top",
             "msr    sp_el1, x0",

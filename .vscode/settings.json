@@ -1,11 +1,12 @@
 {
-    "rust-analyzer.check.targets": [
-        "aarch64-unknown-none",
-        // "x86_64-unknown-none"
-    ],
     "rust-targets.targets": [
         "aarch64-unknown-none",
-        // "x86_64-unknown-none"
+        "system",
     ],
-    "rust-analyzer.cargo.allTargets": false,
+    "rust-analyzer.checkOnSave": true,
+    "python.analysis.typeCheckingMode": "off",
+    "rust-analyzer.check.overrideCommand": [
+        "python",
+        "./clippy.py"
+    ],
 }

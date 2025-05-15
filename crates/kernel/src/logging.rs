@@ -4,6 +4,7 @@ use alloc::format;
 use embedded_graphics::prelude::{RgbColor, WebColors};
 
 use crate::{
+    arch::serial::lock_uart,
     framebuffer::{Color, FRAMEBUFFER, render_text_buf},
     task::context,
 };
@@ -46,18 +47,23 @@ impl log::Log for Logger {
             log::Level::Trace => "\x1b[37m", // White
         };
         let reset = "\x1b[0m"; // Reset color
-        let target = record.target().split("::").last().unwrap_or("");
-        crate::arch::serial::write_fmt(format_args!(
-            "{}[{}]{} [{}.{:09}] {} [{}] {}\n",
+        let mut uart = lock_uart();
+        let target = record.target();
+        let file = record.file().unwrap_or("??");
+        let line = record.line().unwrap_or_default();
+        uart.write_fmt(format_args!(
+            "{}[{}]{} [{}.{:09}] {} [{}:{}] {}\n",
             color,
             level_str,
             reset,
             uptime_secs,
             uptime_subsec_nanos,
             pid,
-            target,
+            file,
+            line,
             record.args(),
-        ));
+        ))
+        .ok();
 
         if let Some(fb) = FRAMEBUFFER.get() {
             let mut fb = fb.lock();

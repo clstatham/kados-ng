@@ -1,9 +1,10 @@
 [package]
-edition.workspace = true
+edition = "2024"
 name = "bootloader"
 version = "0.1.0"
 
 [lib]
 crate-type = ["staticlib"]
+test = false
 
 [dependencies]

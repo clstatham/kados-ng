@@ -1,6 +1,6 @@
 use core::fmt::{self, Write};
 
-use super::debugging::gdb_active;
+use spin::{Mutex, MutexGuard};
 
 /* -------- base addresses ------------------------------------------------ */
 
@@ -30,10 +30,12 @@ const LCRH: *mut u32 = (UART0_BASE + 0x2C) as *mut u32;
 const CR: *mut u32 = (UART0_BASE + 0x30) as *mut u32;
 const ICR: *mut u32 = (UART0_BASE + 0x44) as *mut u32;
 
-pub struct GpioUart;
+pub struct GpioUart {
+    _private: (),
+}
 
 impl GpioUart {
-    pub fn init() {
+    pub fn init(&mut self) {
         use core::ptr::{read_volatile, write_volatile};
         // thanks, chatGPT
         unsafe {
@@ -87,7 +89,7 @@ impl GpioUart {
     }
 
     #[inline]
-    pub fn putchar(c: u8) {
+    pub fn putchar(&mut self, c: u8) {
         unsafe {
             loop {
                 let fr = FR.read_volatile();
@@ -101,7 +103,8 @@ impl GpioUart {
         }
     }
 
-    pub fn getchar() -> u8 {
+    #[inline]
+    pub fn getchar(&mut self) -> u8 {
         unsafe {
             loop {
                 let fr = FR.read_volatile();
@@ -114,26 +117,42 @@ impl GpioUart {
             DR.read_volatile() as u8
         }
     }
+
+    #[inline]
+    pub fn try_getchar(&mut self) -> Option<u8> {
+        unsafe {
+            let fr = FR.read_volatile();
+            if fr & 0x10 != 0 {
+                None
+            } else {
+                Some(DR.read_volatile() as u8)
+            }
+        }
+    }
 }
+
+static UART: Mutex<GpioUart> = Mutex::new(GpioUart { _private: () });
 
 impl Write for GpioUart {
     fn write_str(&mut self, s: &str) -> fmt::Result {
         for b in s.bytes() {
             if b == b'\n' {
-                Self::putchar(b'\r');
+                self.putchar(b'\r');
             }
-            Self::putchar(b);
+            self.putchar(b);
         }
         Ok(())
     }
 }
 
+pub fn lock_uart<'a>() -> MutexGuard<'a, GpioUart> {
+    UART.lock()
+}
+
 pub fn write_fmt(args: fmt::Arguments) {
-    if !gdb_active() {
-        GpioUart.write_fmt(args).ok();
-    }
+    UART.lock().write_fmt(args).ok();
 }
 
 pub fn init() {
-    GpioUart::init();
+    UART.lock().init();
 }

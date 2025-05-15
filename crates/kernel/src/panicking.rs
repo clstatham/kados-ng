@@ -7,7 +7,7 @@ use arrayvec::ArrayString;
 use thiserror::Error;
 
 use crate::{
-    arch::{Arch, ArchTrait, serial::GpioUart},
+    arch::{serial::lock_uart, Arch, ArchTrait},
     mem::{
         paging::table::{PageTable, TableKind},
         units::VirtAddr,
@@ -78,16 +78,6 @@ pub fn unwind_kernel_stack() -> Result<(), UnwindStackError> {
                     break;
                 } else {
                     println!("{:>2}: FP={} PC={}", depth, fp_va, pc_va);
-                    // let mut name = None;
-                    // for entry in symtab.iter() {
-                    //     let value = entry.value() as usize;
-                    //     let size = entry.size() as usize;
-
-                    //     if pc >= value && pc < (value + size) {
-                    //         name = entry.get_name(kernel_elf).ok();
-                    //         break;
-                    //     }
-                    // }
                     let name = symbol_name(pc);
 
                     if let Some(name) = name {
@@ -114,11 +104,12 @@ pub fn unwind_kernel_stack() -> Result<(), UnwindStackError> {
     Ok(())
 }
 
-pub fn symbol_name(addr: usize) -> Option<ArrayString<4096>> {
-    GpioUart.write_fmt(format_args!("\n[sym]{}\n", addr)).ok()?;
+pub fn symbol_name(addr: usize) -> Option<ArrayString<2048>> {
+    let mut uart = lock_uart();
+    uart.write_fmt(format_args!("[sym?]{}\n", addr)).ok()?;
     let mut out = ArrayString::new();
     loop {
-        let b = GpioUart::getchar();
+        let b = uart.getchar();
         if b == b'\n' {
             break;
         }
