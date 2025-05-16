@@ -1,7 +1,6 @@
 use aarch64_cpu::registers::*;
 
-use crate::arch::debugging::StopReason;
-use crate::dtb::irq_chip;
+use crate::irq::irq_chip;
 use crate::mem::paging::table::{PageTable, TableKind};
 use crate::mem::units::VirtAddr;
 
@@ -351,13 +350,13 @@ exception_stack!(__serr_current_el_sp0, |stack| {
 });
 exception_stack!(__sync_current_el_spx, |stack| {
     let error_code = exception_code(stack.iret.esr_el1);
-    if error_code == 0x3c {
-        super::debugging::on_irq(stack, StopReason::SwBreakpoint);
-        return;
-    } else if error_code == 0x0e {
-        super::debugging::on_irq(stack, StopReason::HwBreakpoint);
-        return;
-    }
+    // if error_code == 0x3c {
+    //     super::debugging::on_irq(stack, StopReason::SwBreakpoint);
+    //     return;
+    // } else if error_code == 0x0e {
+    //     super::debugging::on_irq(stack, StopReason::HwBreakpoint);
+    //     return;
+    // }
     log::error!("SYNCHRONOUS EXCEPTION (current EL, SPX)");
     log::error!("Code: {error_code:#x}");
     if error_code == 0x25 {

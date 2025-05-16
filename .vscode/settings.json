@@ -3,7 +3,6 @@
         "aarch64-unknown-none",
         "system",
     ],
-    "rust-analyzer.checkOnSave": true,
     "python.analysis.typeCheckingMode": "off",
     "rust-analyzer.check.overrideCommand": [
         "python",

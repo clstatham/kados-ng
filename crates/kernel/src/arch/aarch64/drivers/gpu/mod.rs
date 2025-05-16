@@ -7,7 +7,7 @@ use thiserror::Error;
 
 use crate::{
     arch::{ArchTrait, clean_data_cache, invalidate_data_cache},
-    dtb::{Phandle, get_mmio_addr},
+    fdt::{Phandle, get_mmio_addr},
     framebuffer::FramebufferInfo,
     mem::{
         paging::table::{PageFlags, PageTable, TableKind},
@@ -229,7 +229,7 @@ impl Mailbox {
         let mmio_addr = get_mmio_addr(fdt, &region).unwrap();
 
         Ok(Self {
-            phandle: Phandle(phandle),
+            phandle: Phandle::from(phandle),
             base: mmio_addr.as_hhdm_virt(),
         })
     }

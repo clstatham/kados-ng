@@ -1,71 +1,29 @@
-//! A lot of this code was taken from and inspired by Redox
-
-use alloc::{boxed::Box, vec::Vec};
-use derive_more::{Deref, Display, From, Into};
-use fdt::{Fdt, node::FdtNode, standard_nodes::MemoryRegion};
+use alloc::boxed::Box;
+use fdt::{Fdt, node::FdtNode};
 use spin::Once;
 
 use crate::{
     arch::{Arch, ArchTrait},
-    mem::units::PhysAddr,
+    fdt::Phandle,
 };
 
-pub static mut IRQ_CHIP: Once<IrqChip> = Once::new();
+pub static mut IRQ_CHIP: Once<IrqChipDescriptor> = Once::new();
 
-pub unsafe fn irq_chip<'a>() -> &'a mut IrqChip {
+pub fn init(fdt: &Fdt) {
+    #[allow(static_mut_refs)]
+    unsafe {
+        IRQ_CHIP.call_once(|| IrqChipDescriptor::new(fdt))
+    };
+}
+
+pub unsafe fn irq_chip<'a>() -> &'a mut IrqChipDescriptor {
     #[allow(static_mut_refs)]
     unsafe {
         IRQ_CHIP.get_mut().unwrap()
     }
 }
 
-pub fn init(fdt: &Fdt) {
-    // for node in fdt.all_nodes() {
-    //     println!(
-    //         "{}: {}",
-    //         node.name,
-    //         node.compatible().map(|c| c.first()).unwrap_or_default()
-    //     );
-
-    //     for prop in node.properties() {
-    //         println!("    {}", prop.name);
-    //     }
-    // }
-    // dump(fdt);
-
-    #[allow(static_mut_refs)]
-    unsafe {
-        IRQ_CHIP.call_once(|| IrqChip::new(fdt))
-    };
-}
-
-pub fn dump(fdt: &Fdt) {
-    log::debug!("BEGIN FDT DUMP");
-
-    log::debug!("    ROOT: {}", fdt.root().compatible().first());
-    if let Some(aliases) = fdt.aliases() {
-        log::debug!("    BEGIN ALIASES");
-        for alias in aliases.all() {
-            log::debug!("        {}: {}", alias.0, alias.1);
-        }
-        log::debug!("    END ALIASES");
-    }
-    log::debug!("    BEGIN NODES");
-    for node in fdt.all_nodes() {
-        log::debug!(
-            "        {}: {:?}",
-            node.name,
-            node.compatible()
-                .map(|c| c.all().collect::<Vec<_>>())
-                .unwrap_or_default(),
-        );
-    }
-    log::debug!("    END NODES");
-
-    log::debug!("END FDT DUMP");
-}
-
-pub unsafe fn register_irq(irq: Irq, handler: impl IrqHandlerTrait) {
+pub unsafe fn register_irq(irq: Irq, handler: impl IrqHandler) {
     if irq.as_usize() >= 1024 {
         log::error!("irq {} >= 1024", irq);
     }
@@ -89,41 +47,23 @@ pub unsafe fn enable_irq(irq: Irq) {
     unsafe { irq_chip().enable_irq(irq) }
 }
 
-#[derive(Debug, Copy, Clone)]
+int_wrapper!(pub Irq: u32);
+
+#[derive(Debug, Clone, Copy)]
 pub enum IrqCell {
     L1(u32),
     L2(u32, u32),
     L3(u32, u32, u32),
 }
 
-macro_rules! u32_wrappers {
-    ($($name:ident),* $(,)?) => {
-        $(
-            #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Deref, Display, From, Into)]
-            pub struct $name(pub u32);
-
-            impl $name {
-                pub const fn as_u32(self) -> u32 {
-                    self.0
-                }
-
-                pub const fn as_usize(self) -> usize {
-                    self.as_u32() as usize
-                }
-            }
-        )*
-    };
-}
-u32_wrappers!(Irq, Phandle);
-
-pub trait IrqHandlerTrait: Send + Sync + 'static {
+pub trait IrqHandler: Send + Sync + 'static {
     #[allow(unused)]
     fn post_register_hook(&mut self, irq: Irq) {}
     fn handle_irq(&mut self, irq: Irq);
 }
 
-pub trait IrqChipTrait: IrqHandlerTrait {
-    fn init(&mut self, fdt: &Fdt, descs: &mut [IrqDescriptor]);
+pub trait IrqChip: IrqHandler {
+    fn init(&mut self, fdt: &Fdt, descs: &mut [IrqHandlerDescriptor]);
     fn ack(&mut self) -> Irq;
     fn eoi(&mut self, irq: Irq);
     fn translate_irq(&self, irq_data: IrqCell) -> Option<Irq>;
@@ -136,13 +76,13 @@ pub trait IrqChipTrait: IrqHandlerTrait {
 pub struct Null;
 
 #[allow(unused)]
-impl IrqHandlerTrait for Null {
+impl IrqHandler for Null {
     fn handle_irq(&mut self, irq: Irq) {}
 }
 
 #[allow(unused)]
-impl IrqChipTrait for Null {
-    fn init(&mut self, fdt: &Fdt, descs: &mut [IrqDescriptor]) {}
+impl IrqChip for Null {
+    fn init(&mut self, fdt: &Fdt, descs: &mut [IrqHandlerDescriptor]) {}
     fn ack(&mut self) -> Irq {
         Irq(0)
     }
@@ -159,14 +99,14 @@ impl IrqChipTrait for Null {
 }
 
 #[derive(Default)]
-pub struct IrqDescriptor {
+pub struct IrqHandlerDescriptor {
     pub index: usize,
     pub chip_irq: Irq,
-    pub handler: Option<Box<dyn IrqHandlerTrait>>,
+    pub handler: Option<Box<dyn IrqHandler>>,
     pub used: bool,
 }
 
-impl IrqDescriptor {
+impl IrqHandlerDescriptor {
     pub const INIT: Self = Self {
         index: 0,
         chip_irq: Irq(0),
@@ -175,17 +115,17 @@ impl IrqDescriptor {
     };
 }
 
-pub struct IrqChip {
+pub struct IrqChipDescriptor {
     pub phandle: Phandle,
-    pub chip: Box<dyn IrqChipTrait>,
-    pub descs: Box<[IrqDescriptor; 1024]>,
+    pub chip: Box<dyn IrqChip>,
+    pub descs: Box<[IrqHandlerDescriptor; 1024]>,
 }
 
-impl IrqChip {
+impl IrqChipDescriptor {
     pub fn new(fdt: &Fdt) -> Self {
         let mut this = Self {
             phandle: Phandle::default(),
-            descs: Box::new([IrqDescriptor::INIT; 1024]),
+            descs: Box::new([IrqHandlerDescriptor::INIT; 1024]),
             chip: Box::new(Null),
         };
 
@@ -198,7 +138,7 @@ impl IrqChip {
                 };
 
                 this.phandle =
-                    Phandle(node.property("phandle").unwrap().as_usize().unwrap() as u32);
+                    Phandle::from(node.property("phandle").unwrap().as_usize().unwrap() as u32);
                 let intr_cells = node.interrupt_cells().unwrap();
 
                 log::debug!(
@@ -206,7 +146,7 @@ impl IrqChip {
                     node.name,
                     compatible,
                     intr_cells,
-                    this.phandle.as_u32()
+                    this.phandle.value()
                 );
 
                 if node.interrupt_parent().is_some() {
@@ -290,25 +230,4 @@ pub fn get_interrupt(fdt: &Fdt, node: &FdtNode, idx: usize) -> Option<IrqCell> {
         3 if let Ok([a, b, c]) = intr.next_chunk() => Some(IrqCell::L3(a, b, c)),
         _ => None,
     }
-}
-
-pub fn get_mmio_addr(fdt: &Fdt, region: &MemoryRegion) -> Option<PhysAddr> {
-    let mut mapped_addr = region.starting_address as usize;
-    let size = region.size.unwrap_or(0).saturating_sub(1);
-    let last_addr = mapped_addr.saturating_add(size);
-
-    if let Some(parent) = fdt.find_node("/soc") {
-        let mut ranges = parent.ranges().map(|f| f.peekable())?;
-        if ranges.peek().is_some() {
-            let parent_range = ranges.find(|x| {
-                x.child_bus_address <= mapped_addr && last_addr - x.child_bus_address <= x.size
-            })?;
-            mapped_addr = parent_range
-                .parent_bus_address
-                .checked_add(mapped_addr - parent_range.child_bus_address)?;
-            mapped_addr.checked_add(size)?;
-        }
-    }
-
-    PhysAddr::new(mapped_addr).ok()
 }

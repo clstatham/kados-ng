@@ -48,7 +48,7 @@ impl log::Log for Logger {
         };
         let reset = "\x1b[0m"; // Reset color
         let mut uart = lock_uart();
-        let target = record.target();
+        let target = record.target().split("::").last().unwrap_or("??");
         let file = record.file().unwrap_or("??");
         let line = record.line().unwrap_or_default();
         uart.write_fmt(format_args!(
@@ -59,16 +59,20 @@ impl log::Log for Logger {
             uptime_secs,
             uptime_subsec_nanos,
             pid,
-            file,
+            if level <= log::Level::Warn {
+                file
+            } else {
+                target
+            },
             line,
             record.args(),
         ))
         .ok();
+        drop(uart);
 
         if let Some(fb) = FRAMEBUFFER.get() {
             let mut fb = fb.lock();
             fb.set_text_fgcolor_default();
-            fb.write_fmt(format_args!("[")).ok();
             let color = match level {
                 log::Level::Error => Color::RED,
                 log::Level::Warn => Color::YELLOW,
@@ -77,10 +81,10 @@ impl log::Log for Logger {
                 log::Level::Trace => Color::CSS_LIGHT_GRAY,
             };
             fb.set_text_fgcolor(color);
-            fb.write_fmt(format_args!("{level_str}")).ok();
+            fb.write_fmt(format_args!("[{level_str}]")).ok();
             fb.set_text_fgcolor_default();
             fb.write_fmt(format_args!(
-                "] [{}.{:09}] {} [{}] {}\n",
+                " [{}.{:09}] {} [{}] {}\n",
                 uptime_secs,
                 uptime_subsec_nanos,
                 pid,

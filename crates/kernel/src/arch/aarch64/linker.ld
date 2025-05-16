@@ -8,8 +8,10 @@ ENTRY(_start)
 
 PHDRS
 {
-    boot PT_LOAD FLAGS(7);
-    kernel PT_LOAD FLAGS(7);
+    boot_text PT_LOAD;
+    boot_data PT_LOAD;
+    kernel_text PT_LOAD;
+    kernel_data PT_LOAD;
 }
 
 SECTIONS
@@ -18,14 +20,14 @@ SECTIONS
     __boot_start = .;
     .boot ALIGN(4K) : AT(BOOT_OFFSET) {
         KEEP( *libbootloader.a:(.text .text.* .rodata .rodata.*) )
-    } : boot
+    } : boot_text
     .boot.data ALIGN(4K) : AT(BOOT_OFFSET + SIZEOF(.boot)) {
         KEEP( *libbootloader.a:(.data .data.*) )
     . = ALIGN(4K);
         __boot_stack_bottom = .;
     . = ALIGN(4K);
         __boot_stack_top = .;
-    } : boot
+    } : boot_data
     .boot.bss (NOLOAD) : ALIGN(4K) {
         __boot_bss = .;
         KEEP( *libbootloader.a:(.bss .bss.* COMMON) )
@@ -49,14 +51,14 @@ SECTIONS
         KEEP(*(.text.vectors*))
 	. = ALIGN(4096);
         __text_end = .;
-    } : kernel
+    } : kernel_text
 
     .rodata ALIGN(4K) : AT(__kernel_phys_start + SIZEOF(.text)) {
         __rodata_start = .;
         *(EXCLUDE_FILE (libbootloader.a) .rodata*)
 	. = ALIGN(4096);
         __rodata_end = .;
-    } : kernel
+    } : kernel_data
 
     .data ALIGN(4K) : AT(__kernel_phys_start + SIZEOF(.text) + SIZEOF(.rodata)) {
         __data_start = .;
@@ -67,7 +69,7 @@ SECTIONS
         __stack_top = .;
     . = ALIGN(4096);
         __data_end = .;
-    } : kernel
+    } : kernel_data
 
     .bss (NOLOAD) : AT(__kernel_phys_start + SIZEOF(.text) + SIZEOF(.rodata) + SIZEOF(.data)) {
         __bss_start = .;

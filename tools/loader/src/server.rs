@@ -1,165 +1,204 @@
 use std::{
+    collections::{BTreeMap, BTreeSet},
+    io::{self},
     net::{Ipv4Addr, SocketAddr, SocketAddrV4},
-    sync::atomic::{AtomicBool, Ordering},
+    sync::Arc,
 };
 
-use anyhow::Result;
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt, ReadHalf, WriteHalf},
     net::{TcpListener, tcp::OwnedWriteHalf},
-    sync::Mutex,
+    sync::{Mutex, RwLock},
+    task::JoinHandle,
 };
 use tokio_serial::SerialStream;
 
+use crate::is_disconnect;
+
 #[derive(Debug, clap::Args)]
 pub struct ServerConfig {
+    /// Path to the serial device to connect to
     #[clap(default_value_t = String::from("/dev/ttyUSB0"))]
     device: String,
+    /// Baud rate for the serial connection
     #[clap(default_value_t = 921600)]
     baud: u32,
-    #[clap(long, default_value_t = SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 1234)))]
-    gdb_addr: SocketAddr,
+    /// Address to bind the monitor server to
     #[clap(long, default_value_t = SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 1235)))]
     monitor_addr: SocketAddr,
+    /// Size of serial read/write chunks
     #[clap(long, default_value_t = 4096)]
     chunk_size: usize,
 }
 
+pub struct SerialConnection {
+    pub tx: Mutex<WriteHalf<SerialStream>>,
+    pub rx: Mutex<ReadHalf<SerialStream>>,
+}
+
+impl SerialConnection {
+    pub fn new(serial: SerialStream) -> Self {
+        let (rx, tx) = tokio::io::split(serial);
+        Self {
+            tx: Mutex::new(tx),
+            rx: Mutex::new(rx),
+        }
+    }
+}
+
+pub struct MonitorClient {
+    pub tx: OwnedWriteHalf,
+    pub task: JoinHandle<io::Result<()>>,
+}
+
 pub struct Server {
-    serial_tx: Mutex<WriteHalf<SerialStream>>,
-    serial_rx: Mutex<ReadHalf<SerialStream>>,
-    gdb_socket: TcpListener,
+    serial: Arc<SerialConnection>,
     monitor_socket: TcpListener,
-    gdb_client: Mutex<Option<OwnedWriteHalf>>,
-    monitor_client: Mutex<Option<OwnedWriteHalf>>,
-    in_transfer_mode: AtomicBool,
+    monitor_clients: RwLock<BTreeMap<SocketAddr, Mutex<MonitorClient>>>,
+    disconnected_clients: RwLock<BTreeSet<SocketAddr>>,
     chunk_size: usize,
 }
 
 impl Server {
-    pub async fn bind(config: &ServerConfig) -> Result<Self> {
+    pub async fn bind(config: &ServerConfig) -> io::Result<Arc<Self>> {
         let serial_port = SerialStream::open(&tokio_serial::new(&config.device, config.baud))?;
-        let (rx, tx) = tokio::io::split(serial_port);
-        let gdb_socket = TcpListener::bind(config.gdb_addr).await?;
         let monitor_socket = TcpListener::bind(config.monitor_addr).await?;
 
-        Ok(Self {
-            serial_tx: Mutex::new(tx),
-            serial_rx: Mutex::new(rx),
-            gdb_socket,
+        Ok(Arc::new(Self {
+            serial: Arc::new(SerialConnection::new(serial_port)),
             monitor_socket,
-            gdb_client: Mutex::new(None),
-            monitor_client: Mutex::new(None),
-            in_transfer_mode: AtomicBool::new(false),
+            monitor_clients: RwLock::new(BTreeMap::new()),
+            disconnected_clients: RwLock::new(BTreeSet::new()),
             chunk_size: config.chunk_size,
-        })
+        }))
     }
 
-    pub async fn serve(&self) -> Result<()> {
-        tokio::try_join!(self.serve_serial(), self.serve_gdb(), self.serve_monitor())?;
-
+    pub async fn serve(self: &Arc<Self>) -> io::Result<()> {
+        log::info!("Starting server...");
+        let serial_clone = self.clone();
+        let monitor_clone = self.clone();
+        let reap_clone = self.clone();
+        let serial_loop = tokio::spawn(serial_clone.serial_loop());
+        let monitor_loop = tokio::spawn(monitor_clone.accept_monitor_connections());
+        let reap_loop = tokio::spawn(reap_clone.reap_disconnected_clients());
+        tokio::select! {
+            res = serial_loop => {
+                if let Err(e) = res {
+                    log::error!("Serial loop error: {e}");
+                }
+            }
+            res = monitor_loop => {
+                if let Err(e) = res {
+                    log::error!("Monitor loop error: {e}");
+                }
+            }
+            res = reap_loop => {
+                if let Err(e) = res {
+                    log::error!("Reap loop error: {e}");
+                }
+            }
+            _ = tokio::signal::ctrl_c() => {
+                log::info!("Received Ctrl+C, shutting down...");
+            }
+        }
         Ok(())
     }
 
-    async fn read_and_forward_to_monitor(&self, buf: &mut [u8]) -> Result<usize> {
-        if let Some(mon) = self.monitor_client.lock().await.as_mut() {
-            let size = self.serial_rx.lock().await.read_exact(buf).await?;
-            mon.write_all(&buf[..size]).await?;
-            mon.flush().await?;
-            Ok(size)
-        } else {
-            Ok(0)
-        }
-    }
-
-    async fn forward_to_gdb(&self, buf: &[u8]) -> Result<()> {
-        if let Some(gdb) = self.gdb_client.lock().await.as_mut() {
-            gdb.write_all(buf).await?;
-            gdb.flush().await?;
-        }
-        Ok(())
-    }
-
-    async fn serve_serial(&self) -> Result<()> {
+    async fn reap_disconnected_clients(self: Arc<Self>) -> io::Result<()> {
         loop {
-            let mut buf = [0u8; 1];
-            let size = self.read_and_forward_to_monitor(&mut buf).await?;
-            if size == 0 {
-                continue;
-            }
-            if self.in_transfer_mode.load(Ordering::SeqCst) {
-                continue;
-            }
+            let mut disconnected_clients = self.disconnected_clients.write().await;
+            let mut monitor_clients = self.monitor_clients.write().await;
 
-            let [data] = buf;
-            if data == b'+' || data == b'-' {
-                self.forward_to_gdb(&[data]).await?;
-            } else if data == b'$' {
-                let mut packet = vec![data];
-                loop {
-                    self.read_and_forward_to_monitor(&mut buf).await?;
-                    let [byte] = buf;
-                    packet.push(byte);
-                    if byte == b'#' {
-                        let mut buf = [0u8; 2];
-                        self.read_and_forward_to_monitor(&mut buf).await?;
-                        packet.extend(buf);
-                        break;
+            while let Some(addr) = disconnected_clients.pop_first() {
+                if let Some(client) = monitor_clients.remove(&addr) {
+                    log::debug!("Removing disconnected monitor client {addr}");
+                    let mut conn = client.lock().await;
+                    if let Err(e) = conn.tx.shutdown().await {
+                        log::error!("Error shutting down client {addr}: {e}");
+                    }
+                    conn.task.abort();
+                } else {
+                    log::warn!("Client {addr} not found in monitor clients");
+                }
+            }
+        }
+    }
+
+    async fn schedule_disconnect(&self, addr: SocketAddr) {
+        let mut disconnected_clients = self.disconnected_clients.write().await;
+        if disconnected_clients.insert(addr) {
+            log::debug!("Scheduled client {addr} for disconnection");
+        }
+    }
+
+    async fn serial_loop(self: Arc<Self>) -> io::Result<()> {
+        let mut buf = vec![0u8; self.chunk_size];
+        loop {
+            let n = self.serial.rx.lock().await.read(&mut buf).await?;
+            if n == 0 {
+                log::warn!("Serial connection closed");
+                break;
+            }
+            let monitor_clients = self.monitor_clients.read().await;
+            for (addr, client) in monitor_clients.iter() {
+                let mut conn = client.lock().await;
+                match conn.tx.write_all(&buf[..n]).await {
+                    Ok(()) => {}
+                    Err(e) => {
+                        if is_disconnect(&e) {
+                            log::warn!("Monitor client {addr} disconnected: {e}");
+                        } else {
+                            log::error!("Error writing to monitor client {addr}: {e}");
+                        }
+                        self.schedule_disconnect(*addr).await;
                     }
                 }
-                if let Ok(s) = str::from_utf8(&packet) {
-                    log::info!("[serial -> gdb] {s}");
-                }
-                self.forward_to_gdb(&packet).await?;
             }
         }
+
+        Ok(())
     }
 
-    async fn serve_gdb(&self) -> Result<()> {
-        let (conn, addr) = self.gdb_socket.accept().await?;
-        log::info!("Accepted GDB connection from {addr}");
-        let (mut conn_rx, conn_tx) = conn.into_split();
-        *self.gdb_client.lock().await = Some(conn_tx);
-        let mut buf = vec![0u8; self.chunk_size];
+    async fn accept_monitor_connections(self: Arc<Self>) -> io::Result<()> {
         loop {
-            let size = conn_rx.read(&mut buf).await?;
-            if size > 0 {
-                let data = &buf[..size];
-                if let Ok(s) = str::from_utf8(data) {
-                    log::info!("[gdb -> serial] {}", s.trim());
+            let (conn, addr) = self.monitor_socket.accept().await?;
+            let (mut rx, tx) = conn.into_split();
+            log::info!("Accepted monitor connection from {addr}");
+
+            let serial = self.serial.clone();
+            let chunk_size = self.chunk_size;
+
+            let self_clone = self.clone();
+            let task = tokio::spawn(async move {
+                let mut buf = vec![0u8; chunk_size];
+                loop {
+                    let n = match rx.read(&mut buf).await {
+                        Ok(0) => {
+                            log::info!("Monitor connection from {addr} closed gracefully");
+                            self_clone.schedule_disconnect(addr).await;
+                            return io::Result::Ok(());
+                        }
+                        Ok(n) => n,
+                        Err(e) if is_disconnect(&e) => {
+                            log::info!("Monitor connection from {addr} closed: {e}");
+                            self_clone.schedule_disconnect(addr).await;
+                            return io::Result::Ok(());
+                        }
+                        Err(e) => {
+                            log::error!("Error reading from monitor client {addr}: {e}");
+                            self_clone.schedule_disconnect(addr).await;
+                            return Err(e);
+                        }
+                    };
+                    let mut serial_tx = serial.tx.lock().await;
+                    serial_tx.write_all(&buf[..n]).await?;
                 }
-                let mut port = self.serial_tx.lock().await;
-                port.write_all(data).await?;
-                port.flush().await?;
-            }
-        }
-    }
+            });
 
-    async fn serve_monitor(&self) -> Result<()> {
-        let (conn, addr) = self.monitor_socket.accept().await?;
-        log::info!("Accepted Monitor connection from {addr}");
-        let (mut conn_rx, conn_tx) = conn.into_split();
-        *self.monitor_client.lock().await = Some(conn_tx);
-        let mut buf = vec![0u8; self.chunk_size];
-        loop {
-            let size = conn_rx.read(&mut buf).await?;
-            let data = &buf[..size];
-            if data.starts_with(b"BEGINBEGINBEGINBEGIN") {
-                log::info!("[mon] Begin kernel transfer");
-                self.in_transfer_mode.store(true, Ordering::SeqCst);
-            } else if data.starts_with(b"ENDENDENDENDENDENDEND") {
-                log::info!("[mon] End kernel transfer");
-                self.in_transfer_mode.store(false, Ordering::SeqCst);
-            } else if size > 0 {
-                // if let Ok(s) = str::from_utf8(data) {
-                //     if !s.trim().is_empty() {
-                //         log::info!("[mon -> serial] {}", s.trim());
-                //     }
-                // }
-                let mut port = self.serial_tx.lock().await;
-                port.write_all(data).await?;
-                port.flush().await?;
-            }
+            self.monitor_clients
+                .write()
+                .await
+                .insert(addr, Mutex::new(MonitorClient { tx, task }));
         }
     }
 }

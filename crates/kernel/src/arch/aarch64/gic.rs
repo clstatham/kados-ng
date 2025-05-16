@@ -3,7 +3,8 @@ use core::ops::Range;
 use fdt::Fdt;
 
 use crate::{
-    dtb::{Irq, IrqCell, IrqChipTrait, IrqDescriptor, IrqHandlerTrait, get_mmio_addr},
+    fdt::get_mmio_addr,
+    irq::{Irq, IrqCell, IrqChip, IrqHandler, IrqHandlerDescriptor},
     mem::units::{PhysAddr, VirtAddr},
     syscall::errno::Errno,
 };
@@ -73,14 +74,14 @@ impl Gic {
     }
 }
 
-impl IrqHandlerTrait for Gic {
+impl IrqHandler for Gic {
     fn handle_irq(&mut self, _irq: Irq) {
         log::warn!("handle_irq() called on Gic (no-op)");
     }
 }
 
-impl IrqChipTrait for Gic {
-    fn init(&mut self, fdt: &Fdt, descs: &mut [IrqDescriptor]) {
+impl IrqChip for Gic {
+    fn init(&mut self, fdt: &Fdt, descs: &mut [IrqHandlerDescriptor]) {
         let GicAddrs {
             dist_phys,
             cpu_phys,
@@ -98,7 +99,7 @@ impl IrqChipTrait for Gic {
         let count = self.dist.num_irqs.min(1024) as usize;
         let mut i = 0;
         while i < count && i < 1024 {
-            descs[i].chip_irq = Irq(i as u32);
+            descs[i].chip_irq = Irq::from(i as u32);
             descs[i].used = true;
             i += 1;
         }
@@ -127,7 +128,7 @@ impl IrqChipTrait for Gic {
             IrqCell::L3(1, irq, _flags) => irq as usize,
             _ => return None,
         };
-        Some(Irq((off + self.irq_range.start) as u32))
+        Some(Irq::from((off + self.irq_range.start) as u32))
     }
 
     fn manual_irq(&mut self, irq: Irq) {
@@ -235,10 +236,10 @@ impl GicCpu {
     }
 
     pub unsafe fn ack_irq(&mut self) -> Irq {
-        unsafe { Irq(self.base.read(GICC_IAR)) }
+        unsafe { Irq::from(self.base.read(GICC_IAR)) }
     }
 
     pub unsafe fn eoi_irq(&mut self, irq: Irq) {
-        unsafe { self.base.write(GICC_EOIR, irq.as_u32()) };
+        unsafe { self.base.write(GICC_EOIR, irq.value()) };
     }
 }

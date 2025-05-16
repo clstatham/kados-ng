@@ -22,7 +22,7 @@ extern crate alloc;
 
 pub mod arch;
 pub mod cpu_local;
-pub mod dtb;
+pub mod fdt;
 pub mod logging;
 pub mod syscall;
 pub mod task;
@@ -31,6 +31,7 @@ pub mod time;
 pub mod util;
 #[macro_use]
 pub mod framebuffer;
+pub mod irq;
 pub mod mem;
 pub mod panicking;
 pub mod sync;
@@ -117,7 +118,10 @@ pub(crate) extern "C" fn kernel_main() -> ! {
 
     log::info!("initializing device tree...");
     let fdt = boot_info.fdt.as_ref().unwrap();
-    dtb::init(fdt);
+    fdt::init(fdt);
+
+    log::info!("initializing irq chip...");
+    irq::init(fdt);
 
     log::info!("initializing per-cpu structure...");
     unsafe {
@@ -157,8 +161,6 @@ welcome to...
 
 "#
     );
-
-    Arch::breakpoint();
 
     unsafe { Arch::enable_interrupts() }
 

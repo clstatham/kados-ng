@@ -4,7 +4,7 @@ use aarch64_cpu::{asm::barrier, registers::*};
 use fdt::Fdt;
 
 use crate::{
-    dtb::{Irq, IrqHandlerTrait, register_irq},
+    irq::{Irq, IrqHandler, register_irq},
     task::switch::switch,
 };
 
@@ -12,7 +12,7 @@ pub fn init(_fdt: &Fdt) {
     let mut timer = GenericTimer::default();
     timer.init();
 
-    let irq = Irq(30);
+    let irq = Irq::from(30);
     unsafe { register_irq(irq, timer) };
 }
 
@@ -47,7 +47,7 @@ impl GenericTimer {
     }
 }
 
-impl IrqHandlerTrait for GenericTimer {
+impl IrqHandler for GenericTimer {
     fn handle_irq(&mut self, _irq: Irq) {
         self.clear_irq();
         *crate::time::UPTIME.lock() += self.clk_freq as u64;

@@ -7,7 +7,7 @@ use serial::PERIPHERAL_BASE;
 use crate::{
     BOOT_INFO,
     cpu_local::CpuLocalBlock,
-    dtb::IrqChipTrait,
+    irq::IrqChip,
     mem::{
         paging::{
             allocator::KernelFrameAllocator,
@@ -20,7 +20,6 @@ use crate::{
 use super::ArchTrait;
 
 pub mod boot;
-pub mod debugging;
 pub mod drivers;
 pub mod gic;
 pub mod serial;
@@ -245,7 +244,7 @@ impl ArchTrait for AArch64 {
         VirtAddr::new_canonical(TPIDR_EL1.get() as usize)
     }
 
-    fn new_irq_chip(compatible: &str) -> Option<Box<dyn IrqChipTrait>> {
+    fn new_irq_chip(compatible: &str) -> Option<Box<dyn IrqChip>> {
         if compatible.contains("arm,gic-400") {
             Some(Box::new(gic::Gic::default()))
         } else {
