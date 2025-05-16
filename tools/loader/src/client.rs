@@ -1,12 +1,11 @@
 use std::{
-    io,
     net::{IpAddr, Ipv4Addr, SocketAddr},
     path::PathBuf,
 };
 
 use indicatif::{ProgressBar, ProgressStyle};
 use tokio::{
-    io::{AsyncReadExt, AsyncWriteExt},
+    io::{self, AsyncReadExt, AsyncWriteExt},
     net::{TcpStream, tcp::WriteHalf},
 };
 use xmas_elf::{ElfFile, sections::SectionData, symbol_table::Entry};
@@ -22,7 +21,7 @@ pub struct ClientConfig {
     #[clap(long, default_value_t = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 1235))]
     addr: SocketAddr,
     /// Chunk size for kernel transfer
-    #[clap(long, default_value_t = 4096)]
+    #[clap(long, default_value_t = 16*1024)]
     chunk_size: usize,
 }
 
@@ -44,6 +43,8 @@ impl Client {
 
         let conn = TcpStream::connect(config.addr).await?;
         conn.set_nodelay(true)?;
+
+        log::info!("Connected to server at {}", config.addr);
 
         Ok(Self {
             kernel,

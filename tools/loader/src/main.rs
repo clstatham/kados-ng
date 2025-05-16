@@ -14,13 +14,9 @@ pub fn is_disconnect(e: &std::io::Error) -> bool {
     )
 }
 
+/// Load and monitor KaDOS on a real Raspberry Pi
 #[derive(Parser, Debug)]
-#[clap(
-    author,
-    version,
-    about,
-    long_about = "Load and monitor KaDOS on a real Raspberry Pi"
-)]
+#[clap(author, version, about)]
 struct Args {
     #[clap(subcommand)]
     command: Command,

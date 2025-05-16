@@ -1,12 +1,11 @@
 use std::{
     collections::{BTreeMap, BTreeSet},
-    io::{self},
     net::{Ipv4Addr, SocketAddr, SocketAddrV4},
     sync::Arc,
 };
 
 use tokio::{
-    io::{AsyncReadExt, AsyncWriteExt, ReadHalf, WriteHalf},
+    io::{self, AsyncReadExt, AsyncWriteExt, ReadHalf, WriteHalf},
     net::{TcpListener, tcp::OwnedWriteHalf},
     sync::{Mutex, RwLock},
     task::JoinHandle,
@@ -28,7 +27,7 @@ pub struct ServerConfig {
     #[clap(long, default_value_t = SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 1235)))]
     monitor_addr: SocketAddr,
     /// Size of serial read/write chunks
-    #[clap(long, default_value_t = 4096)]
+    #[clap(long, default_value_t = 16*1024)]
     chunk_size: usize,
 }
 
@@ -64,6 +63,7 @@ impl Server {
     pub async fn bind(config: &ServerConfig) -> io::Result<Arc<Self>> {
         let serial_port = SerialStream::open(&tokio_serial::new(&config.device, config.baud))?;
         let monitor_socket = TcpListener::bind(config.monitor_addr).await?;
+        log::info!("Listening on {}", config.monitor_addr);
 
         Ok(Arc::new(Self {
             serial: Arc::new(SerialConnection::new(serial_port)),
@@ -75,7 +75,6 @@ impl Server {
     }
 
     pub async fn serve(self: &Arc<Self>) -> io::Result<()> {
-        log::info!("Starting server...");
         let serial_clone = self.clone();
         let monitor_clone = self.clone();
         let reap_clone = self.clone();
@@ -168,12 +167,9 @@ impl Server {
             let (mut rx, tx) = conn.into_split();
             log::info!("Accepted monitor connection from {addr}");
 
-            let serial = self.serial.clone();
-            let chunk_size = self.chunk_size;
-
             let self_clone = self.clone();
             let task = tokio::spawn(async move {
-                let mut buf = vec![0u8; chunk_size];
+                let mut buf = vec![0u8; self_clone.chunk_size];
                 loop {
                     let n = match rx.read(&mut buf).await {
                         Ok(0) => {
@@ -193,7 +189,7 @@ impl Server {
                             return Err(e);
                         }
                     };
-                    let mut serial_tx = serial.tx.lock().await;
+                    let mut serial_tx = self_clone.serial.tx.lock().await;
                     serial_tx.write_all(&buf[..n]).await?;
                 }
             });
