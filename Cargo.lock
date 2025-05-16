@@ -478,28 +478,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "gdbstub"
-version = "0.6.6"
-source = "git+https://github.com/daniel5151/gdbstub.git?branch=dev%2F0.7#7d2413d6907367e0e758485a5bd042b989efd776"
-dependencies = [
- "bitflags 2.9.1",
- "cfg-if",
- "log",
- "managed",
- "num-traits",
- "paste",
-]
-
-[[package]]
-name = "gdbstub_arch"
-version = "0.2.4"
-source = "git+https://github.com/daniel5151/gdbstub.git?branch=dev%2F0.7#7d2413d6907367e0e758485a5bd042b989efd776"
-dependencies = [
- "gdbstub",
- "num-traits",
-]
-
-[[package]]
 name = "gimli"
 version = "0.31.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -592,15 +570,12 @@ dependencies = [
  "derive_more",
  "embedded-graphics",
  "fdt",
- "gdbstub",
- "gdbstub_arch",
  "log",
  "qemu-exit",
  "rustc-demangle",
  "spin 0.10.0",
  "spinning_top",
  "thiserror",
- "xmas-elf",
 ]
 
 [[package]]
@@ -648,12 +623,6 @@ checksum = "19b955cdeb2a02b9117f121ce63aa52d08ade45de53e48fe6a38b39c10f6f709"
 dependencies = [
  "libc",
 ]
-
-[[package]]
-name = "managed"
-version = "0.8.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0ca88d725a0a943b096803bd34e73a4437208b6077654cc4ecb2947a5f91618d"
 
 [[package]]
 name = "memchr"
@@ -786,12 +755,6 @@ dependencies = [
  "smallvec",
  "windows-targets",
 ]
-
-[[package]]
-name = "paste"
-version = "1.0.15"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "57c0d7b74b563b49d38dae00a0c37d4d6de9b432382b2892f0574ddcae73fd0a"
 
 [[package]]
 name = "pin-project-lite"

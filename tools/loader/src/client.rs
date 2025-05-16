@@ -6,8 +6,8 @@ use std::{
 
 use indicatif::{ProgressBar, ProgressStyle};
 use tokio::{
-    io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader},
-    net::TcpStream,
+    io::{AsyncReadExt, AsyncWriteExt},
+    net::{TcpStream, tcp::WriteHalf},
 };
 use xmas_elf::{ElfFile, sections::SectionData, symbol_table::Entry};
 
@@ -155,48 +155,61 @@ impl Client {
 
         let (mut rx, mut tx) = self.conn.split();
         let mut buf = vec![0u8; self.chunk_size];
-        'outer: loop {
+        loop {
             let size = rx.read(&mut buf).await?;
             let data = &buf[..size];
-            if data.starts_with(b"[sym?]") {
-                if let Some(symbols) = symbols.as_ref() {
-                    let addr = String::from_utf8_lossy(data.strip_prefix(b"[sym?]").unwrap());
-                    let Ok(addr) = addr.trim().parse::<u64>() else {
-                        tx.write_all(b"unknown\n").await?;
-                        continue 'outer;
-                    };
-                    if let Some(symtab) = symbols.find_section_by_name(".symtab") {
-                        let Ok(SectionData::SymbolTable64(syms)) = symtab.get_data(symbols) else {
-                            tx.write_all(b"unknown\n").await?;
-                            continue 'outer;
-                        };
-                        for entry in syms {
-                            if (entry.value()..entry.value() + entry.size()).contains(&addr) {
-                                let Ok(name) = entry.get_name(symbols) else {
-                                    tx.write_all(b"unknown\n").await?;
-                                    continue 'outer;
-                                };
-                                tx.write_all(name.as_bytes()).await?;
-                                tx.write_all(b"\n").await?;
-                                continue 'outer;
-                            }
-                        }
-                        tx.write_all(b"unknown\n").await?;
-                        continue 'outer;
-                    } else {
-                        tx.write_all(b"unknown\n").await?;
-                        continue 'outer;
-                    }
-                } else {
-                    tx.write_all(b"unknown\n").await?;
-                    continue 'outer;
-                }
-            } else {
+            let is_symbol_request =
+                maybe_handle_symbol_request(symbols.as_ref(), data, &mut tx).await?;
+            if !is_symbol_request {
                 tokio::io::stdout().write_all(data).await?;
                 tokio::io::stdout().flush().await?;
             }
         }
+    }
+}
 
-        Ok(())
+async fn maybe_handle_symbol_request(
+    symbols: Option<&ElfFile<'_>>,
+    data: &[u8],
+    tx: &mut WriteHalf<'_>,
+) -> io::Result<bool> {
+    if data.starts_with(b"[sym?]") {
+        if let Some(symbols) = symbols.as_ref() {
+            let addr = String::from_utf8_lossy(data.strip_prefix(b"[sym?]").unwrap());
+            if let Ok(addr) = addr.trim().parse::<u64>() {
+                if let Some(name) = find_symbol(symbols, addr) {
+                    tx.write_all(name).await?;
+                    tx.write_all(b"\n").await?;
+                } else {
+                    tx.write_all(b"unknown\n").await?;
+                }
+            } else {
+                tx.write_all(b"unknown\n").await?;
+            }
+        } else {
+            tx.write_all(b"unknown\n").await?;
+        }
+        Ok(true)
+    } else {
+        Ok(false)
+    }
+}
+
+fn find_symbol<'a>(symbols: &ElfFile<'a>, addr: u64) -> Option<&'a [u8]> {
+    if let Some(symtab) = symbols.find_section_by_name(".symtab") {
+        let Ok(SectionData::SymbolTable64(syms)) = symtab.get_data(symbols) else {
+            return None;
+        };
+        for entry in syms {
+            if (entry.value()..entry.value() + entry.size()).contains(&addr) {
+                let Ok(name) = entry.get_name(symbols) else {
+                    return None;
+                };
+                return Some(name.as_bytes());
+            }
+        }
+        None
+    } else {
+        None
     }
 }

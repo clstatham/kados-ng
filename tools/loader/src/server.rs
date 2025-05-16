@@ -10,6 +10,7 @@ use tokio::{
     net::{TcpListener, tcp::OwnedWriteHalf},
     sync::{Mutex, RwLock},
     task::JoinHandle,
+    time::Duration,
 };
 use tokio_serial::SerialStream;
 
@@ -106,6 +107,7 @@ impl Server {
 
     async fn reap_disconnected_clients(self: Arc<Self>) -> io::Result<()> {
         loop {
+            tokio::time::sleep(Duration::from_millis(100)).await;
             let mut disconnected_clients = self.disconnected_clients.write().await;
             let mut monitor_clients = self.monitor_clients.write().await;
 
@@ -118,7 +120,7 @@ impl Server {
                     }
                     conn.task.abort();
                 } else {
-                    log::warn!("Client {addr} not found in monitor clients");
+                    log::debug!("Client {addr} not found in monitor clients");
                 }
             }
         }
@@ -162,6 +164,7 @@ impl Server {
     async fn accept_monitor_connections(self: Arc<Self>) -> io::Result<()> {
         loop {
             let (conn, addr) = self.monitor_socket.accept().await?;
+            conn.set_nodelay(true)?;
             let (mut rx, tx) = conn.into_split();
             log::info!("Accepted monitor connection from {addr}");
 
@@ -180,7 +183,7 @@ impl Server {
                         }
                         Ok(n) => n,
                         Err(e) if is_disconnect(&e) => {
-                            log::info!("Monitor connection from {addr} closed: {e}");
+                            log::warn!("Monitor connection from {addr} closed: {e}");
                             self_clone.schedule_disconnect(addr).await;
                             return io::Result::Ok(());
                         }
