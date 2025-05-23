@@ -3,7 +3,7 @@ use spin::{Mutex, MutexGuard, Once};
 
 use crate::{
     BootInfo,
-    arch::{Arch, ArchTrait},
+    arch::{Arch, Architecture},
     mem::{
         MemError,
         units::{FrameCount, PhysAddr},

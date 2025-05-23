@@ -3,7 +3,7 @@ use core::{alloc::Layout, ptr::NonNull};
 use buddy_system_allocator::LockedHeap;
 
 use crate::{
-    arch::ArchTrait,
+    arch::Architecture,
     mem::{
         paging::{
             allocator::KernelFrameAllocator,

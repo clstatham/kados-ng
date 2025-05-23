@@ -6,7 +6,7 @@ use fdt::Fdt;
 use thiserror::Error;
 
 use crate::{
-    arch::{ArchTrait, clean_data_cache, invalidate_data_cache},
+    arch::{Architecture, clean_data_cache, invalidate_data_cache},
     fdt::{Phandle, get_mmio_addr},
     framebuffer::FramebufferInfo,
     mem::{

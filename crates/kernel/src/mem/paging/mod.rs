@@ -4,7 +4,7 @@ use table::{BlockSize, PageFlags, PageTable, TableKind};
 use crate::{
     __kernel_phys_end, __kernel_phys_start, __rodata_end, __rodata_start, __text_end, __text_start,
     BootInfo, KERNEL_OFFSET,
-    arch::{Arch, ArchTrait},
+    arch::{Arch, Architecture},
     mem::{
         heap::{KERNEL_HEAP_SIZE, KERNEL_HEAP_START},
         units::VirtAddr,

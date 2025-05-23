@@ -10,7 +10,7 @@
 )]
 #![feature(if_let_guard, iter_next_chunk, array_chunks)]
 
-use arch::{Arch, ArchTrait};
+use arch::{Arch, Architecture};
 use fdt::Fdt;
 use mem::paging::{
     MemMapEntries,

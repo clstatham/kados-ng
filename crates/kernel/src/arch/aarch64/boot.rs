@@ -4,7 +4,7 @@ use fdt::Fdt;
 
 use crate::{
     BOOT_INFO, BootInfo,
-    arch::{Arch, ArchTrait},
+    arch::{Arch, Architecture},
     mem::{
         paging::{MemMapEntries, MemMapEntry},
         units::{FrameCount, PhysAddr},

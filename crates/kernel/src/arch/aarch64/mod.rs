@@ -17,7 +17,7 @@ use crate::{
     },
 };
 
-use super::ArchTrait;
+use super::Architecture;
 
 pub mod boot;
 pub mod drivers;
@@ -46,7 +46,7 @@ impl AArch64 {
             | Self::PAGE_FLAG_NON_EXECUTABLE;
 }
 
-impl ArchTrait for AArch64 {
+impl Architecture for AArch64 {
     const PAGE_SHIFT: usize = 12;
 
     const PAGE_ENTRY_SHIFT: usize = 9;
@@ -213,14 +213,6 @@ impl ArchTrait for AArch64 {
         }
     }
 
-    #[inline(always)]
-    fn instruction_pointer() -> usize {
-        let pc: usize;
-        unsafe {
-            asm!("mov {}, pc", out(reg) pc);
-        }
-        pc
-    }
 
     #[inline(always)]
     fn stack_pointer() -> usize {

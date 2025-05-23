@@ -6,7 +6,7 @@ use core::{
 use derive_more::{BitAnd, BitOr, BitXor};
 
 use crate::{
-    arch::{Arch, ArchTrait},
+    arch::{Arch, Architecture},
     mem::{
         MemError,
         units::{PhysAddr, VirtAddr},

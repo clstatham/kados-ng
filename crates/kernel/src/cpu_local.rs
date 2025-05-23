@@ -3,7 +3,7 @@ use core::cell::{Cell, RefCell};
 use alloc::sync::Arc;
 
 use crate::{
-    arch::{Arch, ArchTrait},
+    arch::{Arch, Architecture},
     task::{addr_space::AddrSpaceLock, switch::CpuLocalSwitchState},
 };
 

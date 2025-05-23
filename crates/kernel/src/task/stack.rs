@@ -1,5 +1,5 @@
 use crate::{
-    arch::{Arch, ArchTrait},
+    arch::{Arch, Architecture},
     mem::{
         paging::allocator::KernelFrameAllocator,
         units::{FrameCount, PhysAddr},
@@ -26,7 +26,7 @@ impl Stack {
             self.base
                 .as_hhdm_virt()
                 .as_raw_ptr_mut::<u8>()
-                .add(Arch::PAGE_SIZE * 16)
+                .add(self.len())
         }
     }
 

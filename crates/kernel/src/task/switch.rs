@@ -9,7 +9,7 @@ use spin::Once;
 use spinning_top::{RwSpinlock, guard::ArcRwSpinlockWriteGuard};
 
 use crate::{
-    arch::{Arch, ArchTrait, task::switch_to},
+    arch::{Arch, Architecture, task::switch_to},
     cpu_local::CpuLocalBlock,
     mem::units::PhysAddr,
     task::context::Status,

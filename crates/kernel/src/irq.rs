@@ -3,7 +3,7 @@ use fdt::{Fdt, node::FdtNode};
 use spin::Once;
 
 use crate::{
-    arch::{Arch, ArchTrait},
+    arch::{Arch, Architecture},
     fdt::Phandle,
 };
 

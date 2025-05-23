@@ -1,5 +1,5 @@
 use crate::{
-    arch::{Arch, ArchTrait},
+    arch::{Arch, Architecture},
     mem::units::VirtAddr,
 };
 

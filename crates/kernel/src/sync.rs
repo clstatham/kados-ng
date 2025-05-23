@@ -7,7 +7,7 @@ use spin::mutex::{SpinMutex, SpinMutexGuard};
 use thiserror::Error;
 
 use crate::{
-    arch::{Arch, ArchTrait},
+    arch::{Arch, Architecture},
     println,
 };
 

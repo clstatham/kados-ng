@@ -18,7 +18,7 @@ use crate::is_disconnect;
 #[derive(Debug, clap::Args)]
 pub struct ServerConfig {
     /// Path to the serial device to connect to
-    #[clap(default_value_t = String::from("/dev/ttyUSB0"))]
+    #[clap(default_value_t = String::from("/dev/ttyACM1"))]
     device: String,
     /// Baud rate for the serial connection
     #[clap(default_value_t = 921600)]

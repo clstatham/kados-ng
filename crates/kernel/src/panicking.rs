@@ -7,7 +7,7 @@ use arrayvec::ArrayString;
 use thiserror::Error;
 
 use crate::{
-    arch::{Arch, ArchTrait, serial::lock_uart},
+    arch::{Arch, Architecture, serial::lock_uart},
     mem::{
         paging::table::{PageTable, TableKind},
         units::VirtAddr,

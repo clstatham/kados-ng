@@ -4,7 +4,7 @@ use derive_more::*;
 
 use crate::{
     HHDM_PHYSICAL_OFFSET,
-    arch::{Arch, ArchTrait},
+    arch::{Arch, Architecture},
 };
 
 use super::{MemError, paging::table::PageTableLevel};
