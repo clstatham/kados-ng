@@ -133,7 +133,6 @@ impl Architecture for AArch64 {
     #[inline(always)]
     unsafe fn enable_interrupts() {
         DAIF.modify(DAIF::I::CLEAR);
-        log::trace!("interrupts enabled");
     }
 
     #[inline(always)]
@@ -142,7 +141,6 @@ impl Architecture for AArch64 {
         DAIF.modify(DAIF::A::SET);
         DAIF.modify(DAIF::I::SET);
         DAIF.modify(DAIF::F::SET);
-        log::trace!("interrupts disabled");
     }
 
     unsafe fn interrupts_enabled() -> bool {

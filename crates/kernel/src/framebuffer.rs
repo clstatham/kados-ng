@@ -2,19 +2,22 @@ use core::ops::Add;
 
 use alloc::boxed::Box;
 use embedded_graphics::{
+    Pixel,
     mono_font::{MonoFont, MonoTextStyle, ascii},
-    prelude::*,
+    prelude::{Size, *},
     text::Text,
 };
 use spin::Once;
 
-pub use embedded_graphics::pixelcolor::Rgb888 as Color;
+use embedded_graphics::pixelcolor::Rgb888;
 
 use crate::{
     arch::clean_data_cache,
     mem::units::VirtAddr,
     sync::{IrqMutex, IrqMutexGuard},
 };
+
+pub type Color = Rgb888;
 
 const FONT: MonoFont = ascii::FONT_10X20;
 
@@ -37,7 +40,12 @@ impl FbChar {
         Self { char, fg }
     }
 
-    pub fn to_text(&self, top_left: Point, x: usize, y: usize) -> Text<MonoTextStyle<Color>> {
+    pub fn to_text(
+        &'_ self,
+        top_left: Point,
+        x: usize,
+        y: usize,
+    ) -> Text<'_, MonoTextStyle<'_, Color>> {
         Text::new(
             core::str::from_utf8(core::slice::from_ref(&self.char)).unwrap_or(" "),
             top_left
@@ -56,6 +64,7 @@ pub struct FrameBuffer {
     width: usize,
     height: usize,
     bpp: usize,
+    back_buffer: Box<[u32]>,
     text_buf: Box<[[Option<FbChar>; TEXT_BUFFER_WIDTH]; TEXT_BUFFER_HEIGHT]>,
     text_cursor_x: usize,
     text_cursor_y: usize,
@@ -95,9 +104,8 @@ impl FrameBuffer {
         for line in 0..TEXT_BUFFER_HEIGHT {
             for col in 0..TEXT_BUFFER_WIDTH {
                 if let Some(ch) = self.text_buf[line][col] {
-                    ch.to_text(self.bounding_box().top_left, col, line)
-                        .draw(self)
-                        .unwrap();
+                    let text = ch.to_text(self.bounding_box().top_left, col, line);
+                    text.draw(self).unwrap();
                 }
             }
         }
@@ -139,13 +147,31 @@ impl FrameBuffer {
         self.cursor_color_hook();
     }
 
+    pub fn set_pixel(&mut self, x: usize, y: usize, color: Color) {
+        if x >= self.width || y >= self.height {
+            return;
+        }
+
+        self.back_buffer[x + y * self.width] = color.into_storage();
+    }
+
     pub fn set_pixel_raw(&mut self, x: usize, y: usize, color: u32) {
         let width = self.width;
         unsafe {
             let ptr = self.frame_mut().as_mut_ptr().add(x + y * width);
-            ptr.write_volatile(color);
-
+            ptr.write(color);
             clean_data_cache(ptr.cast(), size_of::<u32>());
+        }
+    }
+
+    pub fn present(&mut self) {
+        unsafe {
+            core::ptr::copy_nonoverlapping(
+                self.back_buffer.as_ptr(),
+                self.frame_mut().as_mut_ptr(),
+                self.size_bytes() / size_of::<u32>(),
+            );
+            clean_data_cache(self.frame_mut().as_mut_ptr().cast(), self.size_bytes());
         }
     }
 
@@ -261,12 +287,12 @@ impl DrawTarget for FrameBuffer {
 
     fn draw_iter<I>(&mut self, pixels: I) -> Result<(), Self::Error>
     where
-        I: IntoIterator<Item = embedded_graphics::Pixel<Self::Color>>,
+        I: IntoIterator<Item = Pixel<Self::Color>>,
     {
         for Pixel(coord, color) in pixels.into_iter() {
             let (x, y) = coord.into();
             if (0..self.width as i32).contains(&x) && (0..self.height as i32).contains(&y) {
-                self.set_pixel_raw(x as usize, y as usize, color.into_storage());
+                self.set_pixel(x as usize, y as usize, color);
             }
         }
 
@@ -274,15 +300,15 @@ impl DrawTarget for FrameBuffer {
     }
 
     fn clear(&mut self, color: Self::Color) -> Result<(), Self::Error> {
-        self.frame_mut().fill(color.into_storage());
-        let ptr = self.start_addr.as_raw_ptr_mut();
-        unsafe { clean_data_cache(ptr, self.size_bytes) };
+        let color = color.into_storage();
+        self.back_buffer.fill(color);
+
         Ok(())
     }
 }
 
 impl OriginDimensions for FrameBuffer {
-    fn size(&self) -> embedded_graphics::prelude::Size {
+    fn size(&self) -> Size {
         Size::new(self.width as u32, self.height as u32)
     }
 }
@@ -296,6 +322,7 @@ pub fn fb<'a>() -> IrqMutexGuard<'a, FrameBuffer> {
 pub fn render_text_buf() {
     fb().clear_pixels();
     fb().render_text_buf();
+    fb().present();
 }
 
 #[macro_export]
@@ -349,6 +376,7 @@ pub fn init() {
         width,
         height,
         bpp,
+        back_buffer: alloc::vec![0; size_bytes / size_of::<u32>()].into_boxed_slice(),
         text_buf: Box::new([[None; TEXT_BUFFER_WIDTH]; TEXT_BUFFER_HEIGHT]),
         text_cursor_x: 0,
         text_cursor_y: 0,

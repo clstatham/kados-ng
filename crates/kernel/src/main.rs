@@ -36,20 +36,32 @@ pub mod mem;
 pub mod panicking;
 pub mod sync;
 
+/// Boot information structure.
 #[repr(C)]
 pub struct BootInfo {
+    /// The flattened device tree blob, if available.
     pub fdt: Option<Fdt<'static>>,
+
+    /// The memory map entries determined by the bootloader.
     pub mem_map: MemMapEntries<32>,
 }
 
+/// The boot information structure, initialized by the bootloader.
 pub static BOOT_INFO: Once<BootInfo> = Once::new();
 
+/// The offset between physical and virtual addresses when mapped linearly.
 pub const HHDM_PHYSICAL_OFFSET: usize = 0xffff_8000_0000_0000;
-pub const KERNEL_OFFSET: usize = 0xffff_ffff_8000_0000; // must match linker.ld
+
+/// The base address of the kernel in virtual memory.
+///
+/// This must match the value in the linker script.
+pub const KERNEL_OFFSET: usize = 0xffff_ffff_8000_0000;
 
 macro_rules! elf_offsets {
     ($($name:ident),* $(,)?) => {
         $(
+            #[inline(always)]
+            #[doc = concat!("Returns the address of the kernel ELF symbol `", stringify!($name), "`.")]
             pub fn $name() -> usize {
                 unsafe extern "C" {
                     unsafe static $name: u8;
@@ -77,6 +89,9 @@ elf_offsets!(
     __stack_top,
 );
 
+/// The entry point for the kernel.
+///
+/// This function is called by the bootloader after it has set up the CPU and memory.
 #[unsafe(no_mangle)]
 pub(crate) extern "C" fn kernel_main() -> ! {
     unsafe {
@@ -172,6 +187,7 @@ extern "C" fn test() {
     task::context::exit_current();
 }
 
+/// Prints a formatted string to the serial console and framebuffer.
 #[macro_export]
 macro_rules! print {
     ($($arg:tt)*) => ({
@@ -180,6 +196,7 @@ macro_rules! print {
     });
 }
 
+/// Prints a formatted string to the serial console.
 #[macro_export]
 macro_rules! serial_print {
     ($($arg:tt)*) => {
@@ -187,6 +204,7 @@ macro_rules! serial_print {
     };
 }
 
+/// Prints a formatted string to the serial console and framebuffer, followed by a newline.
 #[macro_export]
 macro_rules! println {
     () => ({
@@ -200,6 +218,8 @@ macro_rules! println {
         let _ = $crate::framebuffer::write_fmt(format_args!("\n"));
     });
 }
+
+/// Prints a formatted string to the serial console, followed by a newline.
 #[macro_export]
 macro_rules! serial_println {
     () => ({

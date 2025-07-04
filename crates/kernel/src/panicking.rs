@@ -37,6 +37,7 @@ fn panic(info: &core::panic::PanicInfo) -> ! {
     Arch::hcf()
 }
 
+/// An error that can occur while unwinding the kernel stack.
 #[derive(Debug, Error)]
 pub enum UnwindStackError {
     #[error("Kernel ELF file not initialized")]
@@ -47,6 +48,7 @@ pub enum UnwindStackError {
     FailedToGetSectionData,
 }
 
+/// Unwinds the kernel stack and prints the backtrace.
 #[inline(always)]
 pub fn unwind_kernel_stack() -> Result<(), UnwindStackError> {
     let mut fp = Arch::frame_pointer();
@@ -104,6 +106,9 @@ pub fn unwind_kernel_stack() -> Result<(), UnwindStackError> {
     Ok(())
 }
 
+/// Returns the name of the symbol at the given address.
+/// This function sends a request to the UART and waits for a response.
+/// It is a blocking call and may take some time to return.
 pub fn symbol_name(addr: usize) -> Option<ArrayString<2048>> {
     let mut uart = lock_uart();
     uart.write_fmt(format_args!("[sym?]{}\n", addr)).ok()?;

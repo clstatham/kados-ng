@@ -67,7 +67,7 @@ impl PhysAddr {
     }
 
     pub const fn is_aligned(self, align: usize) -> bool {
-        self.0 % align == 0
+        self.value().is_multiple_of(align) || self.value() & (align - 1) == 0
     }
 
     pub const fn add_bytes(self, offset: usize) -> Self {
@@ -190,7 +190,7 @@ impl VirtAddr {
 
     #[inline(always)]
     pub const fn is_aligned(self, align: usize) -> bool {
-        self.value() % align == 0
+        self.value().is_multiple_of(align) || self.value() & (align - 1) == 0
     }
 
     #[inline(always)]

@@ -50,7 +50,6 @@ impl GenericTimer {
 impl IrqHandler for GenericTimer {
     fn handle_irq(&mut self, _irq: Irq) {
         self.clear_irq();
-        *crate::time::UPTIME.lock() += self.clk_freq as u64;
         switch();
         self.reload_count();
     }

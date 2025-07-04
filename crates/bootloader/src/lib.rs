@@ -351,7 +351,7 @@ pub const TWO_MB: usize = MB * 2;
 pub const GB: usize = MB * 1024;
 
 fn is_aligned(x: usize, align: usize) -> bool {
-    x % align == 0
+    x.is_multiple_of(align) || x & (align - 1) == 0
 }
 
 fn largest_aligned_block_size(phys: usize, virt: usize, size: usize) -> usize {

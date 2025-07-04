@@ -446,7 +446,7 @@ fn unhandled_fault(_faulted_addr: VirtAddr, caused_by_write: bool, dfsc: usize) 
 }
 
 fn handle_irq() {
-    let chip = unsafe { irq_chip() };
+    let mut chip = irq_chip();
     let irq = chip.ack();
 
     log::trace!("IRQ {irq} caught");

@@ -9,6 +9,7 @@ use crate::{
     task::context,
 };
 
+/// A logger that writes log messages to the serial console and framebuffer.
 pub struct Logger;
 
 impl log::Log for Logger {
@@ -98,8 +99,18 @@ impl log::Log for Logger {
     }
 }
 
+/// Initializes the logger by setting it as the global logger and configuring the log level.
 pub fn init() {
     log::set_logger(&Logger).unwrap();
-    log::set_max_level(log::LevelFilter::Debug);
+    let level_env = match option_env!("KADOS_LOG") {
+        Some("trace") => log::LevelFilter::Trace,
+        Some("debug") => log::LevelFilter::Debug,
+        Some("info") => log::LevelFilter::Info,
+        Some("warn") => log::LevelFilter::Warn,
+        Some("error") => log::LevelFilter::Error,
+        Some("off") => log::LevelFilter::Off,
+        _ => log::LevelFilter::Info,
+    };
+    log::set_max_level(level_env);
     log::info!("Logger initialized");
 }
