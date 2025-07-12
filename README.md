@@ -8,7 +8,7 @@ You will need the following prerequisites installed:
 
 - [Rustup](https://rustup.rs/)
 - Git (use your package manager or download [Git for Windows](https://git-scm.com/downloads/win))
-- (**UNIX ONLY**) Common essential build tools like GCC, LD, etc
+- **(UNIX ONLY)** Common essential build tools like GCC, LD, etc
 - **(WINDOWS ONLY)** [Microsoft Visual Studio](https://visualstudio.microsoft.com/vs/community/) (Rustup will install this for you if you want it to)
 - [LLVM](https://github.com/llvm/llvm-project) with its binaries in your `PATH` environment variable
 - [QEMU](https://www.qemu.org/download/) if you want to run it in an emulator

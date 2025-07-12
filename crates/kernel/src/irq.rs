@@ -228,14 +228,17 @@ impl IrqChipDescriptor {
         this
     }
 
+    /// Acknowledges the IRQ and returns the IRQ number.
     pub fn ack(&mut self) -> Irq {
         self.chip.ack()
     }
 
+    /// Sends an end-of-interrupt (EOI) signal for the given IRQ.
     pub fn eoi(&mut self, irq: Irq) {
         self.chip.eoi(irq);
     }
 
+    /// Runs the IRQ handler for the given IRQ, if it has been registered.
     pub fn handle_irq(&mut self, irq: Irq) {
         if irq.as_usize() < 1024 {
             if let Some(handler) = &mut self.descs[irq.as_usize()].handler {
@@ -246,14 +249,17 @@ impl IrqChipDescriptor {
         }
     }
 
+    /// Enables the given IRQ.
     pub fn enable_irq(&mut self, irq: Irq) {
         self.chip.enable_irq(irq);
     }
 
+    /// Disables the given IRQ.
     pub fn disable_irq(&mut self, irq: Irq) {
         self.chip.disable_irq(irq);
     }
 
+    /// Translates the IRQ data from the device tree into an IRQ number.
     pub fn translate_irq(&self, irq_data: &[u32]) -> Option<Irq> {
         let irq_data = match irq_data.len() {
             1 => IrqCell::L1(irq_data[0]),
@@ -264,20 +270,20 @@ impl IrqChipDescriptor {
         self.chip.translate_irq(irq_data)
     }
 
+    /// Manually triggers the given IRQ.
     pub fn manual_irq(&mut self, irq: Irq) {
         self.chip.manual_irq(irq);
     }
 }
 
-pub fn interrupt_parent<'a>(
-    fdt: &'a Fdt<'a>,
-    node: &'a FdtNode<'a, 'a>,
-) -> Option<FdtNode<'a, 'a>> {
+/// Returns the parent interrupt node for the given FDT node.
+fn interrupt_parent<'a>(fdt: &'a Fdt<'a>, node: &'a FdtNode<'a, 'a>) -> Option<FdtNode<'a, 'a>> {
     node.interrupt_parent()
         .or_else(|| fdt.find_node("/soc").and_then(|soc| soc.interrupt_parent()))
         .or_else(|| fdt.find_node("/").and_then(|root| root.interrupt_parent()))
 }
 
+/// Returns the interrupt cell for the given FDT node and index.
 pub fn get_interrupt(fdt: &Fdt, node: &FdtNode, idx: usize) -> Option<IrqCell> {
     let interrupts = node.property("interrupts").unwrap();
     let parent_intr_cells = interrupt_parent(fdt, node)

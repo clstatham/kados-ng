@@ -17,29 +17,36 @@ use crate::{
     sync::{IrqMutex, IrqMutexGuard},
 };
 
+/// Represents a pixel color in the framebuffer.
 pub type Color = Rgb888;
 
 const FONT: MonoFont = ascii::FONT_10X20;
 
+/// The width of the framebuffer's text buffer.
 pub const TEXT_BUFFER_WIDTH: usize = 80;
+/// The height of the framebuffer's text buffer.
 pub const TEXT_BUFFER_HEIGHT: usize = 25;
 
-#[derive(Clone, Copy)]
+/// A character in the framebuffer's text buffer.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct FbChar {
     char: u8,
     fg: Color,
 }
 
 impl FbChar {
+    /// A default character for the framebuffer (a space with black foreground).
     pub const DEFAULT: Self = Self {
         char: b' ',
         fg: Color::BLACK,
     };
 
+    /// Creates a new [`FbChar`] with the given character and foreground color.
     pub fn new(char: u8, fg: Color) -> Self {
         Self { char, fg }
     }
 
+    /// Converts the [`FbChar`] to a [`Text`] object for rendering.
     pub fn to_text(
         &'_ self,
         top_left: Point,
@@ -58,6 +65,8 @@ impl FbChar {
     }
 }
 
+/// Represents a framebuffer for rendering graphics and text.
+#[derive(Debug)]
 pub struct FrameBuffer {
     start_addr: VirtAddr,
     size_bytes: usize,
@@ -72,34 +81,42 @@ pub struct FrameBuffer {
 }
 
 impl FrameBuffer {
+    /// Returns the width of the framebuffer in pixels.
     pub fn width(&self) -> usize {
         self.width
     }
 
+    /// Returns the height of the framebuffer in pixels.
     pub fn height(&self) -> usize {
         self.height
     }
 
+    /// Returns the number of bits per pixel.
     pub fn bpp(&self) -> usize {
         self.bpp
     }
 
+    /// Returns the area of the framebuffer in pixels.
     pub fn size_pixels(&self) -> usize {
         self.width * self.height
     }
 
+    /// Returns the size of the framebuffer in bytes.
     pub fn size_bytes(&self) -> usize {
         self.size_bytes
     }
 
+    /// Sets the foreground color for text rendering.
     pub fn set_text_fgcolor(&mut self, color: Color) {
         self.text_fgcolor = color;
     }
 
+    /// Sets the foreground color for text rendering to the default color (white).
     pub fn set_text_fgcolor_default(&mut self) {
         self.text_fgcolor = Color::WHITE;
     }
 
+    /// Renders the text buffer to the framebuffer.
     pub fn render_text_buf(&mut self) {
         for line in 0..TEXT_BUFFER_HEIGHT {
             for col in 0..TEXT_BUFFER_WIDTH {
@@ -111,10 +128,12 @@ impl FrameBuffer {
         }
     }
 
+    /// Clears the framebuffer by filling it with black pixels.
     pub fn clear_pixels(&mut self) {
         self.clear(Color::BLACK).unwrap();
     }
 
+    /// Returns a mutable slice of the framebuffer's pixel data.
     pub fn frame_mut(&mut self) -> &mut [u32] {
         unsafe {
             core::slice::from_raw_parts_mut(
@@ -124,6 +143,8 @@ impl FrameBuffer {
         }
     }
 
+    /// Writes a single byte to the framebuffer's text buffer at the current cursor position.
+    /// The cursor position is updated accordingly, wrapping to the next line if necessary.
     pub fn write_byte(&mut self, byte: u8) {
         match byte {
             0x8 => self.backspace(),
@@ -147,6 +168,7 @@ impl FrameBuffer {
         self.cursor_color_hook();
     }
 
+    /// Sets a pixel at the given coordinates to the specified color.
     pub fn set_pixel(&mut self, x: usize, y: usize, color: Color) {
         if x >= self.width || y >= self.height {
             return;
@@ -155,15 +177,23 @@ impl FrameBuffer {
         self.back_buffer[x + y * self.width] = color.into_storage();
     }
 
+    /// Sets a pixel at the given coordinates to the specified raw color value.
+    ///
+    /// This writes to raw memory, whereas [`set_pixel`](FrameBuffer::set_pixel)
+    /// actually writes to the framebuffer's back buffer.
     pub fn set_pixel_raw(&mut self, x: usize, y: usize, color: u32) {
-        let width = self.width;
+        let offset = x + y * self.width;
+        if offset > self.size_bytes / size_of::<u32>() {
+            return;
+        }
         unsafe {
-            let ptr = self.frame_mut().as_mut_ptr().add(x + y * width);
+            let ptr = self.frame_mut().as_mut_ptr().add(offset);
             ptr.write(color);
             clean_data_cache(ptr.cast(), size_of::<u32>());
         }
     }
 
+    /// Copies the back buffer to the framebuffer, making the changes visible.
     pub fn present(&mut self) {
         unsafe {
             core::ptr::copy_nonoverlapping(
@@ -177,6 +207,9 @@ impl FrameBuffer {
 
     fn cursor_color_hook(&mut self) {}
 
+    /// Backspaces the last character in the text buffer.
+    ///
+    /// Note that this does not wrap backwards to the previous line.
     pub fn backspace(&mut self) {
         let row = self.text_cursor_y;
         let col = self.text_cursor_x.saturating_sub(1);
@@ -185,12 +218,16 @@ impl FrameBuffer {
         self.cursor_color_hook();
     }
 
+    /// Writes a string to the framebuffer's text buffer at the current cursor position.
     pub fn write_string(&mut self, s: &str) {
         for byte in s.bytes() {
             self.write_byte(byte)
         }
     }
 
+    /// Advances the cursor to the next line in the text buffer.
+    /// If the cursor is already at the last line, it scrolls the text buffer up.
+    /// The cursor is reset to the beginning of the new line.
     pub fn new_line(&mut self) {
         if self.text_cursor_y >= TEXT_BUFFER_HEIGHT - 1 {
             for row in 1..TEXT_BUFFER_HEIGHT {
@@ -209,12 +246,15 @@ impl FrameBuffer {
         self.cursor_color_hook();
     }
 
+    /// Clears the specified row in the text buffer.
     pub fn clear_row(&mut self, row: usize) {
         for col in 0..TEXT_BUFFER_WIDTH {
             self.text_buf[row][col] = None;
         }
         self.cursor_color_hook();
     }
+
+    /// Clears the text buffer from the current cursor position to the end of the text buffer.
     pub fn clear_until_end(&mut self) {
         for col in self.text_cursor_x..TEXT_BUFFER_WIDTH {
             self.text_buf[self.text_cursor_y][col] = None;
@@ -224,6 +264,8 @@ impl FrameBuffer {
         }
         self.cursor_color_hook();
     }
+
+    /// Clears the text buffer from the beginning of the text buffer to the current cursor position.
     pub fn clear_until_beginning(&mut self) {
         for col in 0..self.text_cursor_x {
             self.text_buf[self.text_cursor_y][col] = None;
@@ -233,41 +275,57 @@ impl FrameBuffer {
         }
         self.cursor_color_hook();
     }
+
+    /// Clears the text buffer from the current cursor position to the end of the line.
     pub fn clear_until_eol(&mut self) {
         for col in self.text_cursor_x..TEXT_BUFFER_WIDTH {
             self.text_buf[self.text_cursor_y][col] = None;
         }
         self.cursor_color_hook();
     }
+
+    /// Clears the text buffer from the beginning of the line to the current cursor position.
     pub fn clear_from_bol(&mut self) {
         for col in 0..self.text_cursor_x {
             self.text_buf[self.text_cursor_y][col] = None;
         }
         self.cursor_color_hook();
     }
+
+    /// Clears the current line in the text buffer.
     pub fn clear_line(&mut self) {
         self.clear_row(self.text_cursor_y);
     }
+
+    /// Clears the entire text buffer.
     pub fn clear_text(&mut self) {
         for row in 0..TEXT_BUFFER_HEIGHT {
             self.clear_row(row)
         }
         self.cursor_color_hook();
     }
+
+    /// Moves the text cursor up by one line, if possible.
     pub fn move_up(&mut self) {
         let new_y = self.text_cursor_y.saturating_sub(1);
         self.text_cursor_y = new_y;
         self.cursor_color_hook();
     }
+
+    /// Moves the text cursor down by one line, if possible.
     pub fn move_down(&mut self) {
         let new_y = self.text_cursor_y.add(1).min(TEXT_BUFFER_HEIGHT - 1);
         self.text_cursor_y = new_y;
         self.cursor_color_hook();
     }
+
+    /// Moves the text cursor to the left by one character, if possible.
     pub fn move_left(&mut self) {
         self.text_cursor_x = self.text_cursor_x.saturating_sub(1);
         self.cursor_color_hook();
     }
+
+    /// Moves the text cursor to the right by one character, if possible.
     pub fn move_right(&mut self) {
         self.text_cursor_x = self.text_cursor_x.add(1).min(TEXT_BUFFER_WIDTH - 1);
         self.cursor_color_hook();
@@ -313,18 +371,22 @@ impl OriginDimensions for FrameBuffer {
     }
 }
 
+/// A global framebuffer instance, protected by an IRQ mutex.
 pub static FRAMEBUFFER: Once<IrqMutex<FrameBuffer>> = Once::new();
 
+/// Returns a guard to the global framebuffer instance.
 pub fn fb<'a>() -> IrqMutexGuard<'a, FrameBuffer> {
     FRAMEBUFFER.get().unwrap().lock()
 }
 
+/// Renders the global framebuffer's text buffer to the screen.
 pub fn render_text_buf() {
     fb().clear_pixels();
     fb().render_text_buf();
     fb().present();
 }
 
+/// Prints a formatted string to the framebuffer's text buffer.
 #[macro_export]
 macro_rules! fb_print {
     ($($arg:tt)*) => ({
@@ -332,6 +394,7 @@ macro_rules! fb_print {
     });
 }
 
+/// Prints a formatted string to the framebuffer's text buffer, followed by a newline.
 #[macro_export]
 macro_rules! fb_println {
     () => ($crate::fb_print!("\n"));
@@ -347,6 +410,7 @@ pub fn write_fmt(args: core::fmt::Arguments) {
     }
 }
 
+/// Information about the framebuffer.
 #[derive(Debug, Clone, Copy)]
 pub struct FramebufferInfo {
     pub base: VirtAddr,
@@ -356,8 +420,10 @@ pub struct FramebufferInfo {
     pub bpp: usize,
 }
 
+/// A static reference to the framebuffer information, set by the kernel during device initialization.
 pub static FRAMEBUFFER_INFO: Once<FramebufferInfo> = Once::new();
 
+/// Initializes the global [`FRAMEBUFFER`] from the predefined [`FRAMEBUFFER_INFO`].
 pub fn init() {
     let Some(FramebufferInfo {
         base,

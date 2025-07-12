@@ -7,6 +7,7 @@ use crate::{
     task::{addr_space::AddrSpaceLock, switch::CpuLocalSwitchState},
 };
 
+/// A block of data that is unique to each CPU core.
 pub struct CpuLocalBlock {
     pub switch_state: CpuLocalSwitchState,
 
@@ -15,6 +16,7 @@ pub struct CpuLocalBlock {
 }
 
 impl CpuLocalBlock {
+    /// Initializes a new `CpuLocalBlock` for the current CPU core.
     pub fn init() -> Self {
         Self {
             switch_state: CpuLocalSwitchState::default(),
@@ -23,6 +25,7 @@ impl CpuLocalBlock {
         }
     }
 
+    /// Returns a reference to the current CPU local block.
     pub fn current() -> Option<&'static Self> {
         unsafe { Arch::current_cpu_local_block().deref().ok() }
     }

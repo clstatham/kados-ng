@@ -6,6 +6,7 @@ pub use fdt::*;
 
 use crate::{int_wrapper, mem::units::PhysAddr};
 
+/// Initializes the FDT subsystem.
 pub fn init(_fdt: &Fdt) {
     // for node in fdt.all_nodes() {
     //     println!(
@@ -21,6 +22,7 @@ pub fn init(_fdt: &Fdt) {
     // dump(fdt);
 }
 
+/// Dumps the FDT structure to the log.
 pub fn dump(fdt: &Fdt) {
     log::debug!("BEGIN FDT DUMP");
 
@@ -49,6 +51,7 @@ pub fn dump(fdt: &Fdt) {
 
 int_wrapper!(pub Phandle: u32);
 
+/// Returns the MMIO address for a given memory region in the device tree.
 pub fn get_mmio_addr(fdt: &Fdt, region: &MemoryRegion) -> Option<PhysAddr> {
     let mut mapped_addr = region.starting_address as usize;
     let size = region.size.unwrap_or(0).saturating_sub(1);
