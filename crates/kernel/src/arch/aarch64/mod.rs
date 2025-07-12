@@ -273,6 +273,7 @@ impl Architecture for AArch64 {
     }
 }
 
+/// Cleans the data cache for the specified address range.
 pub unsafe fn clean_data_cache(addr: *const u8, len: usize) {
     let start = addr as usize & !63;
     let end = (addr as usize + len + 63) & !63;
@@ -282,6 +283,7 @@ pub unsafe fn clean_data_cache(addr: *const u8, len: usize) {
     unsafe { asm!("dsb ish") }
 }
 
+/// Invalidates the data cache for the specified address range.
 pub unsafe fn invalidate_data_cache(addr: *const u8, len: usize) {
     let start = addr as usize & !63;
     let end = (addr as usize + len + 63) & !63;

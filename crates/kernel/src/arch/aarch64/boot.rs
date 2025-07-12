@@ -49,6 +49,11 @@ unsafe fn memzero(start: usize, end: usize) {
     }
 }
 
+/// The higher-half boot function.
+///
+/// This function is called by the bootloader to initialize the kernel in higher-half memory.
+/// It sets up the BSS section, parses the flattened device tree (FDT),
+/// and calls the `kernel_main` function.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn boot_higher_half(dtb_ptr: *const u8) -> ! {
     unsafe {

@@ -58,16 +58,22 @@ unsafe extern "C" {
     unsafe static __exception_vectors: u8;
 }
 
+/// Returns the address of the exception vector table.
 pub unsafe fn exception_vector_table() -> VirtAddr {
     unsafe { VirtAddr::new_unchecked(&__exception_vectors as *const _ as usize) }
 }
 
+/// Registers used for returning from an interrupt or exception.
 #[derive(Default, Clone, Copy)]
 #[repr(C, packed)]
 pub struct IretRegs {
+    /// The stack pointer used when returning to user mode.
     pub sp_el0: usize,
+    /// The exception syndrome register for EL1, which contains information about the exception.
     pub esr_el1: usize,
+    /// The saved program status register for EL1, which contains the state of the processor at the time of the exception.
     pub spsr_el1: usize,
+    /// The link register for EL1, which is used to return from the exception.
     pub elr_el1: usize,
 }
 
@@ -80,6 +86,7 @@ impl IretRegs {
     }
 }
 
+/// Caller-saved registers used for scratch space during interrupts.
 #[derive(Default, Clone, Copy)]
 #[repr(C, packed)]
 pub struct ScratchRegs {
@@ -129,6 +136,7 @@ impl ScratchRegs {
     }
 }
 
+/// Callee-saved registers that are preserved across interrupts.
 #[derive(Default, Clone, Copy)]
 #[repr(C, packed)]
 pub struct PreservedRegs {

@@ -7,6 +7,7 @@ use crate::{
 
 use super::vectors::{InterruptFrame, enter_usermode};
 
+/// The architecture-specific context for a task.
 #[derive(Debug, Clone, Default)]
 #[allow(unused)]
 pub struct ArchContext {
@@ -30,6 +31,10 @@ pub struct ArchContext {
 }
 
 impl ArchContext {
+    /// Sets up the entry point for the task's context.
+    ///
+    /// If `user` is true, it prepares the context for user mode execution,
+    /// otherwise it prepares for kernel mode execution.
     pub fn setup_initial_call(&mut self, stack: &Stack, entry_func: extern "C" fn(), user: bool) {
         let mut stack_top = stack.initial_top();
 
@@ -48,6 +53,7 @@ impl ArchContext {
     }
 }
 
+/// Switches the current task's context to the next task's context.
 pub unsafe fn switch_to(prev: &mut Context, next: &mut Context) {
     CpuLocalBlock::current()
         .unwrap()

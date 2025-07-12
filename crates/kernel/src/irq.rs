@@ -84,7 +84,7 @@ pub trait IrqHandler: Send + Sync + 'static {
 
 /// Represents an IRQ chip that can handle interrupts.
 pub trait IrqChip: IrqHandler {
-    /// Initializes the IRQ chip with the given FDT and IRQ handler descriptor array.
+    /// Initializes the IRQ chip with the given FDT and IRQ handler descriptor array to modify.
     ///
     /// This function is responsible for setting up the IRQ chip and its handlers.
     fn init(&mut self, fdt: &Fdt, descs: &mut [IrqHandlerDescriptor]);

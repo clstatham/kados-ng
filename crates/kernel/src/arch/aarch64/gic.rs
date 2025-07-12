@@ -25,12 +25,16 @@ const GICC_IAR: usize = 0x000c;
 const GICC_CTLR: usize = 0x0000;
 const GICC_PMR: usize = 0x0004;
 
+/// The physical addresses of the GIC distributor and CPU interface.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct GicAddrs {
+    /// The physical address of the GIC distributor.
     pub dist_phys: PhysAddr,
+    /// The physical address of the GIC CPU interface.
     pub cpu_phys: PhysAddr,
 }
 
+/// The GIC (Generic Interrupt Controller) structure, which contains the distributor and CPU interface.
 #[derive(Default)]
 pub struct Gic {
     pub dist: GicDist,
@@ -39,6 +43,7 @@ pub struct Gic {
 }
 
 impl Gic {
+    /// Parses the GIC addresses from the device tree.
     pub fn parse(fdt: &Fdt) -> Result<GicAddrs, Errno> {
         if let Some(node) = fdt.find_compatible(&["arm,gic-400"]) {
             let region_iter = node.reg().unwrap();
@@ -140,13 +145,17 @@ impl IrqChip for Gic {
     }
 }
 
+/// The GIC distributor structure.
 #[derive(Debug, Default)]
 pub struct GicDist {
+    /// The MMIO base address for the GIC distributor.
     pub base: Mmio<u32>,
+    /// The number of IRQs supported by the GIC distributor.
     pub num_irqs: u32,
 }
 
 impl GicDist {
+    /// Initializes the GIC distributor with the given MMIO address.
     pub unsafe fn init(&mut self, addr: VirtAddr) {
         self.base.addr = addr;
 
@@ -170,6 +179,7 @@ impl GicDist {
         }
     }
 
+    /// Enables the given IRQ in the GIC distributor.
     pub unsafe fn enable_irq(&mut self, irq: Irq) {
         let irq = irq.as_usize();
         log::debug!("enabling IRQ {irq} in ISENABLER");
@@ -194,12 +204,14 @@ impl GicDist {
         }
     }
 
+    /// Checks if the given IRQ is pending in the GIC distributor.
     pub unsafe fn is_irq_pending(&self, irq: Irq) -> bool {
         let off = GICD_ISPENDR + ((irq.as_usize() / 32) * 4);
         let bit = 1 << (irq.as_usize() % 32);
         unsafe { self.base.read(off) & bit == bit }
     }
 
+    /// Disables the given IRQ in the GIC distributor.
     pub unsafe fn disable_irq(&mut self, irq: Irq) {
         log::debug!("disabling IRQ {irq} in ICENABLER");
         let off = GICD_ICENABLER + ((irq.as_usize() / 32) * 4);
@@ -209,6 +221,7 @@ impl GicDist {
         }
     }
 
+    /// Manually triggers the given IRQ in the GIC distributor.
     pub unsafe fn manual_irq(&mut self, irq: Irq) {
         log::debug!("manually triggering IRQ {irq} in ISPENDR");
         let off = GICD_ISPENDR + ((irq.as_usize() / 32) * 4);
@@ -219,12 +232,15 @@ impl GicDist {
     }
 }
 
+/// The GIC CPU interface structure.
 #[derive(Debug, Default)]
 pub struct GicCpu {
+    /// The MMIO base address for the GIC CPU interface.
     pub base: Mmio<u32>,
 }
 
 impl GicCpu {
+    /// Initializes the GIC CPU interface with the given MMIO address.
     pub unsafe fn init(&mut self, addr: VirtAddr) {
         self.base.addr = addr;
 
@@ -235,10 +251,12 @@ impl GicCpu {
         }
     }
 
+    /// Acknowledges the next pending IRQ and returns its number.
     pub unsafe fn ack_irq(&mut self) -> Irq {
         unsafe { Irq::from(self.base.read(GICC_IAR)) }
     }
 
+    /// Sends an end-of-interrupt (EOI) signal for the given IRQ.
     pub unsafe fn eoi_irq(&mut self, irq: Irq) {
         unsafe { self.base.write(GICC_EOIR, irq.value()) };
     }

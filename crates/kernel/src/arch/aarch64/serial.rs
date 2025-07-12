@@ -4,9 +4,13 @@ use spin::{Mutex, MutexGuard};
 
 /* -------- base addresses ------------------------------------------------ */
 
+/// The base address for the BCM2711 peripherals.
 pub const PERIPHERAL_BASE: usize = 0xFE00_0000; // BCM2711 peripheral window
+/// The base address for the GPIO registers.
 pub const GPIO_BASE: usize = PERIPHERAL_BASE + 0x20_0000;
+/// The base address for the clock manager registers.
 pub const CM_BASE: usize = PERIPHERAL_BASE + 0x10_0000; // clock manager
+/// The base address for the UART0 registers.
 pub const UART0_BASE: usize = PERIPHERAL_BASE + 0x20_1000;
 
 /* -------- GPIO registers we need --------------------------------------- */
@@ -30,11 +34,13 @@ const LCRH: *mut u32 = (UART0_BASE + 0x2C) as *mut u32;
 const CR: *mut u32 = (UART0_BASE + 0x30) as *mut u32;
 const ICR: *mut u32 = (UART0_BASE + 0x44) as *mut u32;
 
+/// An instance of the GPIO UART driver.
 pub struct GpioUart {
     _private: (),
 }
 
 impl GpioUart {
+    /// Initializes the GPIO UART driver.
     pub fn init(&mut self) {
         use core::ptr::{read_volatile, write_volatile};
         // thanks, chatGPT
@@ -88,6 +94,7 @@ impl GpioUart {
         }
     }
 
+    /// Writes a character to the UART.
     #[inline]
     pub fn putchar(&mut self, c: u8) {
         unsafe {
@@ -103,6 +110,7 @@ impl GpioUart {
         }
     }
 
+    /// Waits for a character to be available and reads it from the UART.
     #[inline]
     pub fn getchar(&mut self) -> u8 {
         unsafe {
@@ -118,6 +126,9 @@ impl GpioUart {
         }
     }
 
+    /// Tries to read a character from the UART without blocking.
+    ///
+    /// Returns `Some(byte)` if a character is available, or `None` if not.
     #[inline]
     pub fn try_getchar(&mut self) -> Option<u8> {
         unsafe {
@@ -145,14 +156,17 @@ impl Write for GpioUart {
     }
 }
 
+/// Locks the UART for exclusive access.
 pub fn lock_uart<'a>() -> MutexGuard<'a, GpioUart> {
     UART.lock()
 }
 
+/// Writes a formatted string to the UART.
 pub fn write_fmt(args: fmt::Arguments) {
     UART.lock().write_fmt(args).ok();
 }
 
+/// Initializes the GPIO UART driver.
 pub fn init() {
     UART.lock().init();
 }
