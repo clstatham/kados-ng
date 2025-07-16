@@ -1,3 +1,4 @@
+/// An error code enumeration for system calls and other operations.
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 #[repr(i32)]
 #[allow(unused)]
@@ -267,7 +268,12 @@ pub enum Errno {
     EHWPOISON = 133,
 }
 
+/// Helper trait for converting results to `isize` values, useful for interfacing with Linux-style system calls.
 pub trait ErrnoResult: Sized {
+    /// Converts the result to an `isize` value.
+    ///
+    /// `Ok` values are returned as-is, while `Err` values are negated to match the expected error code format for Linux-style system calls.
+    /// `Ok(())` returns `0` for success.
     fn to_isize(self) -> isize;
 }
 

@@ -19,6 +19,7 @@ use super::{
     flush::{PageFlush, PageFlushAll},
 };
 
+/// The size of a page table entry.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(usize)]
 pub enum BlockSize {
@@ -28,16 +29,23 @@ pub enum BlockSize {
 }
 
 impl BlockSize {
+    /// Returns the size of the block in bytes.
     #[inline]
     pub const fn size(self) -> usize {
         1 << self as usize
     }
 
+    /// Returns a bitmask for the block size.
     #[inline]
     pub const fn mask(self) -> usize {
         self.size() - 1
     }
 
+    /// Returns the largest block size that can be used for the given page, frame, and size of the mapping in bytes.
+    ///
+    /// For example, if the page and frame are both aligned to 1 GiB, and the size is at least 1 GiB,
+    /// it will return [`BlockSize::Block1GiB`].
+    #[inline]
     pub const fn largest_aligned(page: VirtAddr, frame: PhysAddr, size: usize) -> Self {
         if page.is_aligned(BlockSize::Block1GiB.size())
             && frame.is_aligned(BlockSize::Block1GiB.size())
@@ -55,6 +63,9 @@ impl BlockSize {
     }
 }
 
+/// The level of a page table in the hierarchy.
+///
+/// A `Level4` table is the top-level table, while a `Level1` table is the bottom-level table.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 #[repr(usize)]
 pub enum PageTableLevel {
@@ -65,6 +76,7 @@ pub enum PageTableLevel {
 }
 
 impl PageTableLevel {
+    /// Returns the next lower level of the page table, if applicable.
     pub const fn next_down(self) -> Option<Self> {
         match self {
             Self::Level4 => Some(Self::Level3),
@@ -74,17 +86,22 @@ impl PageTableLevel {
         }
     }
 
+    /// Returns the bit shift for the page table level.
     pub const fn shift(self) -> usize {
         (self as usize - 1) * Arch::PAGE_ENTRY_SHIFT + Arch::PAGE_SHIFT
     }
 }
 
+/// A raw, page-aligned array of page table entries.
+/// These are usually transmuted from a raw pointer so that individual entries can be accessed
+/// and modified directly.
 #[repr(C, align(4096))]
 pub struct RawPageTable {
     entries: [PageTableEntry; Arch::PAGE_ENTRIES],
 }
 
 impl RawPageTable {
+    /// An empty page table, available as a constant for static initialization.
     pub const EMPTY: Self = Self {
         entries: [PageTableEntry::UNUSED; Arch::PAGE_ENTRIES],
     };
@@ -104,12 +121,17 @@ impl IndexMut<usize> for RawPageTable {
     }
 }
 
+/// A marker for whether a page table is for user space or kernel space.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TableKind {
     User,
     Kernel,
 }
 
+/// A logical page table that can be used to manage memory mappings.
+///
+/// This differs from the [`RawPageTable`] in that it provides methods to create, modify, and traverse the page table hierarchy,
+/// whereas the `RawPageTable` is a simple array of entries.
 pub struct PageTable {
     frame: PhysAddr,
     level: PageTableLevel,
@@ -117,6 +139,7 @@ pub struct PageTable {
 }
 
 impl PageTable {
+    /// Allocates a new level-4 page table using the global kernel frame allocator.
     pub fn create(kind: TableKind) -> PageTable {
         let frame = unsafe { KernelFrameAllocator.allocate_one().expect("Out of memory") };
         PageTable {
@@ -126,6 +149,7 @@ impl PageTable {
         }
     }
 
+    /// Returns the current page table of the given kind, as read by [`Arch::current_page_table`].
     pub fn current(kind: TableKind) -> PageTable {
         unsafe {
             let frame = Arch::current_page_table(kind);
@@ -137,24 +161,29 @@ impl PageTable {
         }
     }
 
+    /// Returns the physical address of the base of the page table.
     pub fn phys_addr(&self) -> PhysAddr {
         self.frame
     }
 
+    /// Returns the virtual address of the base of the page table.
     pub fn virt_addr(&self) -> VirtAddr {
         self.frame.as_hhdm_virt()
     }
 
+    /// Returns `true` if this page table is the current page table for the given kind,
     pub fn is_current(&self) -> bool {
         unsafe { self.frame == Arch::current_page_table(self.kind) }
     }
 
+    /// Makes this page table the current page table for its kind.
     pub unsafe fn make_current(&self) {
         unsafe {
             Arch::set_current_page_table(self.frame, self.kind);
         }
     }
 
+    /// Returns a copy of the page table entry at the given index.
     pub unsafe fn entry(&self, index: usize) -> PageTableEntry {
         unsafe {
             let addr = self
@@ -165,6 +194,7 @@ impl PageTable {
         }
     }
 
+    /// Sets the page table entry at the given index to the given entry.
     pub unsafe fn set_entry(&mut self, index: usize, entry: PageTableEntry) {
         unsafe {
             let addr = self
@@ -175,6 +205,7 @@ impl PageTable {
         }
     }
 
+    /// Returns the next-down page table at the given entry index, if it exists and this is not a level-1 table.
     pub fn next_table(&self, index: usize) -> Result<PageTable, MemError> {
         let next_level = self.level.next_down().ok_or(MemError::NoNextTable)?;
         let entry = unsafe { self.entry(index) };
@@ -189,6 +220,8 @@ impl PageTable {
         }
     }
 
+    /// Creates and returns a new next-down page table at the given index, if it does not already exist;
+    /// otherwise returns the existing one.
     pub fn next_table_create(
         &mut self,
         index: usize,
@@ -212,6 +245,7 @@ impl PageTable {
         })
     }
 
+    /// Translates a virtual address to a level-1 page table entry, allowing access to the page's frame and flags.
     pub fn translate(&self, addr: VirtAddr) -> Result<PageTableEntry, MemError> {
         let p3 = self.next_table(addr.page_table_index(PageTableLevel::Level4))?;
         let p2 = p3.next_table(addr.page_table_index(PageTableLevel::Level3))?;
@@ -219,6 +253,9 @@ impl PageTable {
         unsafe { Ok(p1.entry(addr.page_table_index(PageTableLevel::Level1))) }
     }
 
+    /// Allows modification of a page table entry at the given virtual address.
+    ///
+    /// Returns a [`PageFlush`] that must be flushed after the modification.
     pub fn with_frame_mut<R>(
         &mut self,
         addr: VirtAddr,
@@ -235,6 +272,10 @@ impl PageTable {
         Ok(PageFlush::new(addr))
     }
 
+    /// Remaps a page to a new frame with the given block size and flags.
+    ///
+    /// This will NOT error if the page is already mapped, but will instead overwrite the existing mapping.
+    /// For mapping with error on existing mapping, use [`PageTable::map_to`].
     pub fn remap_to(
         &mut self,
         page: VirtAddr,
@@ -250,6 +291,9 @@ impl PageTable {
         }
     }
 
+    /// Maps a page to a frame with the given block size and flags.
+    ///
+    /// This will error if the page is already mapped. For remapping, use [`PageTable::remap_to`].
     pub fn map_to(
         &mut self,
         page: VirtAddr,
@@ -265,6 +309,7 @@ impl PageTable {
         }
     }
 
+    /// Maps a range of pages to frames in the kernel address space.
     pub fn kernel_map_range(
         &mut self,
         mut page: VirtAddr,
@@ -284,6 +329,7 @@ impl PageTable {
         Ok(PageFlushAll)
     }
 
+    /// Maps a range of pages to frames with the given block size and flags.
     pub fn map_range_with_block_size(
         &mut self,
         mut page: VirtAddr,
@@ -303,6 +349,7 @@ impl PageTable {
         Ok(PageFlushAll)
     }
 
+    /// Remaps a range of pages to frames in the kernel address space.
     pub fn kernel_remap_range(
         &mut self,
         mut page: VirtAddr,
@@ -406,6 +453,8 @@ impl PageTable {
         Ok(PageFlush::new(page))
     }
 
+    /// Dumps the page table entries to the console, showing their addresses and flags.
+    /// This is VERY verbose and should only be used for debugging purposes.
     pub fn dump(&self) {
         for entry_i in 0..Arch::PAGE_ENTRIES {
             let entry = unsafe { self.entry(entry_i) };
@@ -426,13 +475,17 @@ impl PageTable {
     }
 }
 
+/// A single page table entry, representing a mapping from a virtual address to a physical address
+/// with associated flags.
 #[derive(Clone, Copy, PartialEq, Eq)]
 #[repr(transparent)]
 pub struct PageTableEntry(usize);
 
 impl PageTableEntry {
+    /// Creates a new unused page table entry.
     pub const UNUSED: Self = Self(0);
 
+    /// Creates a new page table entry with the given physical address and flags.
     pub fn new(address: PhysAddr, flags: PageFlags) -> Self {
         Self(
             (((address.value() >> Arch::PAGE_SHIFT) & Arch::PAGE_ENTRY_ADDR_MASK)
@@ -441,20 +494,26 @@ impl PageTableEntry {
         )
     }
 
+    /// Creates a new page table entry from a raw double word value.
     pub fn from_raw(data: usize) -> Self {
         Self(data)
     }
 
+    /// Returns the raw value of the page table entry as an unsigned double word value.
     pub fn raw(&self) -> usize {
         self.0
     }
 
+    /// Returns `true` if this page table entry is unused.
     pub fn is_unused(&self) -> bool {
         self == &Self::UNUSED
     }
 
+    /// Returns the physical address of the page table entry.
+    ///
+    /// Errors if the entry is a huge page (1 GiB or 2 MiB).
     pub fn addr(&self) -> Result<PhysAddr, MemError> {
-        if self.flags().has_flag(Arch::PAGE_FLAG_HUGE) {
+        if self.flags().has_flags(Arch::PAGE_FLAG_HUGE) {
             return Err(MemError::HugePage);
         }
         let addr = PhysAddr::new(
@@ -465,10 +524,12 @@ impl PageTableEntry {
         Ok(addr)
     }
 
+    /// Returns the flags of the page table entry.
     pub fn flags(&self) -> PageFlags {
         PageFlags::from_raw(self.raw() & Arch::PAGE_ENTRY_FLAGS_MASK)
     }
 
+    /// Returns `true` if this page table entry is a valid page table.
     pub fn is_table(&self) -> bool {
         if !self
             .addr()
@@ -482,13 +543,14 @@ impl PageTableEntry {
         }
 
         #[cfg(target_arch = "aarch64")]
-        if !self.flags().has_flag(Arch::PAGE_FLAG_NON_BLOCK) {
+        if !self.flags().has_flags(Arch::PAGE_FLAG_NON_BLOCK) {
             return false;
         }
 
         true
     }
 
+    /// Inserts the given flags into the page table entry using a bitwise OR operation.
     pub fn insert_flags(&mut self, flags: PageFlags) {
         self.0 |= flags.raw();
     }
@@ -503,10 +565,12 @@ impl Debug for PageTableEntry {
     }
 }
 
+/// Flags for a page table entry, representing various properties of the page.
 #[derive(Clone, Copy, BitOr, BitAnd, BitXor)]
 pub struct PageFlags(usize);
 
 impl PageFlags {
+    /// Creates a new set of page flags with default values.
     pub const fn new() -> Self {
         Self(
             Arch::PAGE_FLAG_PAGE_DEFAULTS
@@ -516,14 +580,17 @@ impl PageFlags {
         )
     }
 
+    /// Creates an empty set of page flags, with no flags set.
     pub const fn empty() -> Self {
         Self(0)
     }
 
+    /// Creates a new set of page flags for a page table, with default values.
     pub const fn new_table() -> Self {
         Self(Arch::PAGE_FLAG_TABLE_DEFAULTS)
     }
 
+    /// Creates a new set of page flags for a text segment, which is executable, and writable in debug builds.
     pub const fn new_for_text_segment() -> Self {
         if cfg!(debug_assertions) {
             Self::new().executable().writable() // for inserting breakpoints
@@ -532,31 +599,39 @@ impl PageFlags {
         }
     }
 
+    /// Creates a new set of page flags for a read-only data segment.
     pub fn new_for_rodata_segment() -> Self {
         Self::new()
     }
 
+    /// Creates a new set of page flags for a writable data segment.
     pub fn new_for_data_segment() -> Self {
         Self::new().writable()
     }
 
+    /// Creates a new set of page flags for a device memory mapping.
     #[cfg(target_arch = "aarch64")]
     pub fn new_device() -> Self {
         Self::from_raw(Arch::PAGE_FLAG_DEVICE)
     }
 
+    /// Creates a new set of page flags from a raw unsigned double word value.
     pub const fn from_raw(raw: usize) -> Self {
         Self(raw)
     }
 
+    /// Returns the raw value of the page flags as an unsigned double word value.
     pub const fn raw(&self) -> usize {
         self.0
     }
 
-    pub const fn has_flag(&self, flag: usize) -> bool {
+    /// Returns `true` if the page flags contain the given flags.
+    /// Always returns `false` for empty flags.
+    pub const fn has_flags(&self, flag: usize) -> bool {
         self.0 & flag == flag && flag != 0
     }
 
+    /// Sets or clears the given flag in the page flags.
     pub const fn with_flag(&self, flag: usize, value: bool) -> Self {
         if value {
             Self(self.0 | flag)
@@ -565,28 +640,34 @@ impl PageFlags {
         }
     }
 
+    /// Returns `true` if the page flags contain the "present" flag.
     pub const fn is_present(&self) -> bool {
-        self.has_flag(Arch::PAGE_FLAG_PRESENT)
+        self.has_flags(Arch::PAGE_FLAG_PRESENT)
     }
 
+    /// Sets the "present" flag in the page flags.
     pub const fn present(self) -> Self {
         self.with_flag(Arch::PAGE_FLAG_PRESENT, true)
     }
 
+    /// Returns `true` if the page flags contain the "executable" flag.
     pub const fn is_executable(&self) -> bool {
         self.0 & (Arch::PAGE_FLAG_EXECUTABLE | Arch::PAGE_FLAG_NON_EXECUTABLE)
             == Arch::PAGE_FLAG_EXECUTABLE
     }
 
+    /// Sets the "executable" flag in the page flags, clearing the "non-executable" flag.
     pub const fn executable(self) -> Self {
         self.with_flag(Arch::PAGE_FLAG_EXECUTABLE, true)
             .with_flag(Arch::PAGE_FLAG_NON_EXECUTABLE, false)
     }
 
+    /// Returns `true` if the page flags contain the "writable" flag.
     pub const fn is_writable(&self) -> bool {
         self.0 & (Arch::PAGE_FLAG_READONLY | Arch::PAGE_FLAG_READWRITE) == Arch::PAGE_FLAG_READWRITE
     }
 
+    /// Sets the "writable" flag in the page flags, clearing the "readonly" flag.
     pub const fn writable(self) -> Self {
         self.with_flag(Arch::PAGE_FLAG_READONLY | Arch::PAGE_FLAG_READWRITE, false)
             .with_flag(Arch::PAGE_FLAG_READWRITE, true)

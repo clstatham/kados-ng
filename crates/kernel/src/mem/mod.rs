@@ -7,6 +7,7 @@ pub mod heap;
 pub mod paging;
 pub mod units;
 
+/// Error handling for memory operations.
 #[derive(Debug, Error)]
 pub enum MemError {
     #[error("Non-canonical physical address")]

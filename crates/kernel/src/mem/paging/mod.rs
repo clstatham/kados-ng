@@ -17,6 +17,7 @@ pub mod allocator;
 pub mod flush;
 pub mod table;
 
+/// A memory map entry representing a range of physical memory available at boot time.
 #[derive(Clone, Copy)]
 pub struct MemMapEntry {
     pub base: PhysAddr,
@@ -24,18 +25,23 @@ pub struct MemMapEntry {
 }
 
 impl MemMapEntry {
+    /// An empty memory map entry, available as a constant for static initialization.
     pub const EMPTY: Self = Self {
         base: PhysAddr::NULL,
         size: FrameCount::EMPTY,
     };
 }
 
+/// An array of memory map entries representing the usable memory at boot time.
+///
+/// The `N` constant defines the maximum number of entries that can be stored.
 pub struct MemMapEntries<const N: usize> {
     pub usable_entries: [MemMapEntry; N],
     pub usable_entry_count: usize,
 }
 
 impl<const N: usize> MemMapEntries<N> {
+    /// Creates a new empty memory map entries structure.
     pub fn new() -> Self {
         MemMapEntries {
             usable_entries: [MemMapEntry::EMPTY; N],
@@ -43,16 +49,20 @@ impl<const N: usize> MemMapEntries<N> {
         }
     }
 
+    /// Adds a new usable memory map entry to the entries.
     pub fn push_usable(&mut self, entry: MemMapEntry) {
         self.usable_entries[self.usable_entry_count] = entry;
         self.usable_entry_count += 1;
     }
 
+    /// Returns a slice of usable memory map entries.
     pub fn usable_entries(&self) -> &[MemMapEntry] {
         &self.usable_entries[..self.usable_entry_count]
     }
 }
 
+/// Initializes the memory mapping for the kernel, mapping the physical memory
+/// in a new page table and switching to it.
 pub unsafe fn map_memory(boot_info: &BootInfo) {
     let mem_map = &boot_info.mem_map;
 
