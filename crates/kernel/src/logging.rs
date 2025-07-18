@@ -5,7 +5,7 @@ use embedded_graphics::prelude::{RgbColor, WebColors};
 
 use crate::{
     arch::serial::lock_uart,
-    framebuffer::{Color, FRAMEBUFFER, render_text_buf},
+    framebuffer::{Color, with_fb},
     task::context,
     util::DebugCheckedPanic,
 };
@@ -72,8 +72,7 @@ impl log::Log for Logger {
         .ok();
         drop(uart);
 
-        if let Some(fb) = FRAMEBUFFER.get() {
-            let mut fb = fb.lock();
+        with_fb(|fb| {
             fb.set_text_fgcolor_default();
             let color = match level {
                 log::Level::Error => Color::RED,
@@ -94,9 +93,11 @@ impl log::Log for Logger {
                 record.args()
             ))
             .ok();
-            drop(fb);
-            render_text_buf();
-        }
+
+            fb.clear_pixels();
+            fb.render_text_buf();
+            fb.present();
+        });
     }
 }
 

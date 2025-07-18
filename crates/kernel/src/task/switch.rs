@@ -130,7 +130,7 @@ fn is_runnable(cx: &mut Context) -> bool {
 ///
 /// # Panics
 ///
-/// This function will panic if there are no runnable tasks available or if the current context is not set.
+/// This function will panic if the CPU local block is not initialized.
 pub fn switch() -> SwitchResult {
     let block = CpuLocalBlock::current().unwrap();
 

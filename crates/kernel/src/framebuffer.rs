@@ -380,23 +380,14 @@ impl OriginDimensions for FrameBuffer {
 /// A global framebuffer instance, protected by an IRQ mutex.
 pub static FRAMEBUFFER: Once<IrqMutex<FrameBuffer>> = Once::new();
 
-/// Returns a guard to the global framebuffer instance.
+/// Runs the provided function with the framebuffer locked.
 pub fn with_fb<R>(f: impl FnOnce(&mut FrameBuffer) -> R) -> Option<R> {
     let fb = FRAMEBUFFER.get()?;
     let result = {
-        let mut fb = fb.lock();
+        let mut fb = fb.try_lock().ok()?;
         f(&mut fb)
     };
     Some(result)
-}
-
-/// Renders the global framebuffer's text buffer to the screen.
-pub fn render_text_buf() {
-    with_fb(|fb| {
-        fb.clear_pixels();
-        fb.render_text_buf();
-        fb.present();
-    });
 }
 
 /// Prints a formatted string to the framebuffer's text buffer.
@@ -417,10 +408,12 @@ macro_rules! fb_println {
 #[doc(hidden)]
 pub fn write_fmt(args: core::fmt::Arguments) {
     use core::fmt::Write;
-    if let Some(fb) = FRAMEBUFFER.get() {
-        fb.lock().write_fmt(args).unwrap();
-        render_text_buf();
-    }
+    with_fb(|fb| {
+        fb.write_fmt(args).ok();
+        fb.clear_pixels();
+        fb.render_text_buf();
+        fb.present();
+    });
 }
 
 /// Information about the framebuffer.
@@ -471,6 +464,8 @@ pub fn init() {
     framebuf.clear_pixels();
     framebuf.clear_text();
     framebuf.set_text_fgcolor_default();
+    framebuf.render_text_buf();
+    framebuf.present();
 
     FRAMEBUFFER.call_once(|| IrqMutex::new(framebuf));
 
