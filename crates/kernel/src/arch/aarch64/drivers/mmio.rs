@@ -50,6 +50,7 @@ pub struct Mmio<T: MmioValue> {
 }
 
 impl<T: MmioValue> Mmio<T> {
+    #[must_use]
     pub const fn new(addr: VirtAddr) -> Self {
         Self {
             addr,
@@ -57,7 +58,13 @@ impl<T: MmioValue> Mmio<T> {
         }
     }
 
-    #[inline(always)]
+    /// Reads a value from the MMIO address at the specified offset.
+    ///
+    /// # Panics
+    ///
+    /// This function will panic if the read operation fails.
+    #[inline]
+    #[must_use]
     pub unsafe fn read(&self, offset: usize) -> T {
         unsafe {
             asm!("dsb sy", "isb");
@@ -65,7 +72,12 @@ impl<T: MmioValue> Mmio<T> {
         }
     }
 
-    #[inline(always)]
+    /// Writes a value to the MMIO address at the specified offset.
+    ///
+    /// # Panics
+    ///
+    /// This function will panic if the write operation fails.
+    #[inline]
     pub unsafe fn write(&mut self, offset: usize, value: T) {
         unsafe {
             self.addr.add_bytes(offset).write_volatile(value).unwrap();
@@ -73,7 +85,12 @@ impl<T: MmioValue> Mmio<T> {
         }
     }
 
-    #[inline(always)]
+    /// Writes a value to the MMIO address at the specified offset and asserts that the value was written correctly.
+    ///
+    /// # Panics
+    ///
+    /// This function will panic if the read value does not match the written value.
+    #[inline]
     #[track_caller]
     pub unsafe fn write_assert(&mut self, offset: usize, value: T) {
         unsafe {
@@ -82,7 +99,12 @@ impl<T: MmioValue> Mmio<T> {
         }
     }
 
-    #[inline(always)]
+    /// Reads a value from the MMIO address at the specified offset and sets some of its bits.
+    ///
+    /// # Panics
+    ///
+    /// This function will panic if either the read or write operation fails.
+    #[inline]
     pub unsafe fn set(&mut self, offset: usize, bits: T) {
         unsafe {
             let mut value = self.read(offset);
@@ -91,7 +113,12 @@ impl<T: MmioValue> Mmio<T> {
         }
     }
 
-    #[inline(always)]
+    /// Reads a value from the MMIO address at the specified offset and clears some of its bits.
+    ///
+    /// # Panics
+    ///
+    /// This function will panic if either the read or write operation fails.
+    #[inline]
     pub unsafe fn clear(&mut self, offset: usize, bits: T) {
         unsafe {
             let mut value = self.read(offset);
@@ -100,7 +127,13 @@ impl<T: MmioValue> Mmio<T> {
         }
     }
 
-    #[inline(always)]
+    /// Reads a value from the MMIO address at the specified offset and sets some of its bits, asserting that the value was written correctly.
+    ///
+    /// # Panics
+    ///
+    /// This function will panic if the read value does not match the expected value after writing,
+    /// or if the read or write operations fail.
+    #[inline]
     #[track_caller]
     pub unsafe fn set_assert(&mut self, offset: usize, bits: T) {
         unsafe {
@@ -110,7 +143,13 @@ impl<T: MmioValue> Mmio<T> {
         }
     }
 
-    #[inline(always)]
+    /// Reads a value from the MMIO address at the specified offset and clears some of its bits, asserting that the value was written correctly.
+    ///
+    /// # Panics
+    ///
+    /// This function will panic if the read value does not match the expected value after writing,
+    /// or if the read or write operations fail.
+    #[inline]
     #[track_caller]
     pub unsafe fn clear_assert(&mut self, offset: usize, bits: T) {
         unsafe {
@@ -120,22 +159,22 @@ impl<T: MmioValue> Mmio<T> {
         }
     }
 
-    #[inline(always)]
+    #[inline]
     pub unsafe fn spin_until_hi(&self, offset: usize, mask: T) {
         crate::util::spin_while(|| unsafe { self.read(offset) & mask != mask });
     }
 
-    #[inline(always)]
+    #[inline]
     pub unsafe fn spin_while_hi(&self, offset: usize, mask: T) {
         crate::util::spin_while(|| unsafe { self.read(offset) & mask == mask });
     }
 
-    #[inline(always)]
+    #[inline]
     pub unsafe fn spin_until_lo(&self, offset: usize, mask: T) {
         crate::util::spin_while(|| unsafe { self.read(offset) & mask != T::ZERO });
     }
 
-    #[inline(always)]
+    #[inline]
     pub unsafe fn spin_while_lo(&self, offset: usize, mask: T) {
         crate::util::spin_while(|| unsafe { self.read(offset) & mask == T::ZERO });
     }

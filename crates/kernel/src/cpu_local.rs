@@ -17,6 +17,7 @@ pub struct CpuLocalBlock {
 
 impl CpuLocalBlock {
     /// Initializes a new `CpuLocalBlock` for the current CPU core.
+    #[must_use]
     pub fn init() -> Self {
         Self {
             switch_state: CpuLocalSwitchState::default(),
@@ -26,6 +27,7 @@ impl CpuLocalBlock {
     }
 
     /// Returns a reference to the current CPU local block.
+    #[must_use]
     pub fn current() -> Option<&'static Self> {
         unsafe { Arch::current_cpu_local_block().deref().ok() }
     }

@@ -31,12 +31,14 @@ pub enum BlockSize {
 impl BlockSize {
     /// Returns the size of the block in bytes.
     #[inline]
+    #[must_use]
     pub const fn size(self) -> usize {
         1 << self as usize
     }
 
     /// Returns a bitmask for the block size.
     #[inline]
+    #[must_use]
     pub const fn mask(self) -> usize {
         self.size() - 1
     }
@@ -46,6 +48,7 @@ impl BlockSize {
     /// For example, if the page and frame are both aligned to 1 GiB, and the size is at least 1 GiB,
     /// it will return [`BlockSize::Block1GiB`].
     #[inline]
+    #[must_use]
     pub const fn largest_aligned(page: VirtAddr, frame: PhysAddr, size: usize) -> Self {
         if page.is_aligned(BlockSize::Block1GiB.size())
             && frame.is_aligned(BlockSize::Block1GiB.size())
@@ -77,6 +80,7 @@ pub enum PageTableLevel {
 
 impl PageTableLevel {
     /// Returns the next lower level of the page table, if applicable.
+    #[must_use]
     pub const fn next_down(self) -> Option<Self> {
         match self {
             Self::Level4 => Some(Self::Level3),
@@ -87,6 +91,7 @@ impl PageTableLevel {
     }
 
     /// Returns the bit shift for the page table level.
+    #[must_use]
     pub const fn shift(self) -> usize {
         (self as usize - 1) * Arch::PAGE_ENTRY_SHIFT + Arch::PAGE_SHIFT
     }
@@ -140,6 +145,11 @@ pub struct PageTable {
 
 impl PageTable {
     /// Allocates a new level-4 page table using the global kernel frame allocator.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the frame allocator runs out of memory.
+    #[must_use]
     pub fn create(kind: TableKind) -> PageTable {
         let frame = unsafe { KernelFrameAllocator.allocate_one().expect("Out of memory") };
         PageTable {
@@ -150,6 +160,7 @@ impl PageTable {
     }
 
     /// Returns the current page table of the given kind, as read by [`Arch::current_page_table`].
+    #[must_use]
     pub fn current(kind: TableKind) -> PageTable {
         unsafe {
             let frame = Arch::current_page_table(kind);
@@ -162,16 +173,19 @@ impl PageTable {
     }
 
     /// Returns the physical address of the base of the page table.
+    #[must_use]
     pub fn phys_addr(&self) -> PhysAddr {
         self.frame
     }
 
     /// Returns the virtual address of the base of the page table.
+    #[must_use]
     pub fn virt_addr(&self) -> VirtAddr {
         self.frame.as_hhdm_virt()
     }
 
     /// Returns `true` if this page table is the current page table for the given kind,
+    #[must_use]
     pub fn is_current(&self) -> bool {
         unsafe { self.frame == Arch::current_page_table(self.kind) }
     }
@@ -184,6 +198,11 @@ impl PageTable {
     }
 
     /// Returns a copy of the page table entry at the given index.
+    ///
+    /// # Panics
+    ///
+    /// Panics if reading the entry fails.
+    #[must_use]
     pub unsafe fn entry(&self, index: usize) -> PageTableEntry {
         unsafe {
             let addr = self
@@ -195,6 +214,10 @@ impl PageTable {
     }
 
     /// Sets the page table entry at the given index to the given entry.
+    ///
+    /// # Panics
+    ///
+    /// Panics if writing the entry fails.
     pub unsafe fn set_entry(&mut self, index: usize, entry: PageTableEntry) {
         unsafe {
             let addr = self
@@ -389,7 +412,7 @@ impl PageTable {
                 p3.set_entry(
                     idx,
                     PageTableEntry::new(frame, flags.with_flag(Arch::PAGE_FLAG_HUGE, true)),
-                )
+                );
             };
         } else {
             return Err(MemError::PageAlreadyMapped(page, entry));
@@ -420,7 +443,7 @@ impl PageTable {
                 p2.set_entry(
                     idx,
                     PageTableEntry::new(frame, flags.with_flag(Arch::PAGE_FLAG_HUGE, true)),
-                )
+                );
             };
         } else {
             return Err(MemError::PageAlreadyMapped(page, entry));
@@ -486,6 +509,7 @@ impl PageTableEntry {
     pub const UNUSED: Self = Self(0);
 
     /// Creates a new page table entry with the given physical address and flags.
+    #[must_use]
     pub fn new(address: PhysAddr, flags: PageFlags) -> Self {
         Self(
             (((address.value() >> Arch::PAGE_SHIFT) & Arch::PAGE_ENTRY_ADDR_MASK)
@@ -495,16 +519,19 @@ impl PageTableEntry {
     }
 
     /// Creates a new page table entry from a raw double word value.
+    #[must_use]
     pub fn from_raw(data: usize) -> Self {
         Self(data)
     }
 
     /// Returns the raw value of the page table entry as an unsigned double word value.
+    #[must_use]
     pub fn raw(&self) -> usize {
         self.0
     }
 
     /// Returns `true` if this page table entry is unused.
+    #[must_use]
     pub fn is_unused(&self) -> bool {
         self == &Self::UNUSED
     }
@@ -525,11 +552,13 @@ impl PageTableEntry {
     }
 
     /// Returns the flags of the page table entry.
+    #[must_use]
     pub fn flags(&self) -> PageFlags {
         PageFlags::from_raw(self.raw() & Arch::PAGE_ENTRY_FLAGS_MASK)
     }
 
     /// Returns `true` if this page table entry is a valid page table.
+    #[must_use]
     pub fn is_table(&self) -> bool {
         if !self
             .addr()
@@ -571,6 +600,7 @@ pub struct PageFlags(usize);
 
 impl PageFlags {
     /// Creates a new set of page flags with default values.
+    #[must_use]
     pub const fn new() -> Self {
         Self(
             Arch::PAGE_FLAG_PAGE_DEFAULTS
@@ -581,16 +611,19 @@ impl PageFlags {
     }
 
     /// Creates an empty set of page flags, with no flags set.
+    #[must_use]
     pub const fn empty() -> Self {
         Self(0)
     }
 
     /// Creates a new set of page flags for a page table, with default values.
+    #[must_use]
     pub const fn new_table() -> Self {
         Self(Arch::PAGE_FLAG_TABLE_DEFAULTS)
     }
 
     /// Creates a new set of page flags for a text segment, which is executable, and writable in debug builds.
+    #[must_use]
     pub const fn new_for_text_segment() -> Self {
         if cfg!(debug_assertions) {
             Self::new().executable().writable() // for inserting breakpoints
@@ -600,38 +633,45 @@ impl PageFlags {
     }
 
     /// Creates a new set of page flags for a read-only data segment.
+    #[must_use]
     pub fn new_for_rodata_segment() -> Self {
         Self::new()
     }
 
     /// Creates a new set of page flags for a writable data segment.
+    #[must_use]
     pub fn new_for_data_segment() -> Self {
         Self::new().writable()
     }
 
     /// Creates a new set of page flags for a device memory mapping.
     #[cfg(target_arch = "aarch64")]
+    #[must_use]
     pub fn new_device() -> Self {
         Self::from_raw(Arch::PAGE_FLAG_DEVICE)
     }
 
     /// Creates a new set of page flags from a raw unsigned double word value.
+    #[must_use]
     pub const fn from_raw(raw: usize) -> Self {
         Self(raw)
     }
 
     /// Returns the raw value of the page flags as an unsigned double word value.
+    #[must_use]
     pub const fn raw(&self) -> usize {
         self.0
     }
 
     /// Returns `true` if the page flags contain the given flags.
     /// Always returns `false` for empty flags.
+    #[must_use]
     pub const fn has_flags(&self, flag: usize) -> bool {
         self.0 & flag == flag && flag != 0
     }
 
     /// Sets or clears the given flag in the page flags.
+    #[must_use]
     pub const fn with_flag(&self, flag: usize, value: bool) -> Self {
         if value {
             Self(self.0 | flag)
@@ -641,33 +681,39 @@ impl PageFlags {
     }
 
     /// Returns `true` if the page flags contain the "present" flag.
+    #[must_use]
     pub const fn is_present(&self) -> bool {
         self.has_flags(Arch::PAGE_FLAG_PRESENT)
     }
 
     /// Sets the "present" flag in the page flags.
+    #[must_use]
     pub const fn present(self) -> Self {
         self.with_flag(Arch::PAGE_FLAG_PRESENT, true)
     }
 
     /// Returns `true` if the page flags contain the "executable" flag.
+    #[must_use]
     pub const fn is_executable(&self) -> bool {
         self.0 & (Arch::PAGE_FLAG_EXECUTABLE | Arch::PAGE_FLAG_NON_EXECUTABLE)
             == Arch::PAGE_FLAG_EXECUTABLE
     }
 
     /// Sets the "executable" flag in the page flags, clearing the "non-executable" flag.
+    #[must_use]
     pub const fn executable(self) -> Self {
         self.with_flag(Arch::PAGE_FLAG_EXECUTABLE, true)
             .with_flag(Arch::PAGE_FLAG_NON_EXECUTABLE, false)
     }
 
     /// Returns `true` if the page flags contain the "writable" flag.
+    #[must_use]
     pub const fn is_writable(&self) -> bool {
         self.0 & (Arch::PAGE_FLAG_READONLY | Arch::PAGE_FLAG_READWRITE) == Arch::PAGE_FLAG_READWRITE
     }
 
     /// Sets the "writable" flag in the page flags, clearing the "readonly" flag.
+    #[must_use]
     pub const fn writable(self) -> Self {
         self.with_flag(Arch::PAGE_FLAG_READONLY | Arch::PAGE_FLAG_READWRITE, false)
             .with_flag(Arch::PAGE_FLAG_READWRITE, true)

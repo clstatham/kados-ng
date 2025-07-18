@@ -42,6 +42,7 @@ pub struct MemMapEntries<const N: usize> {
 
 impl<const N: usize> MemMapEntries<N> {
     /// Creates a new empty memory map entries structure.
+    #[must_use]
     pub fn new() -> Self {
         MemMapEntries {
             usable_entries: [MemMapEntry::EMPTY; N],
@@ -56,6 +57,7 @@ impl<const N: usize> MemMapEntries<N> {
     }
 
     /// Returns a slice of usable memory map entries.
+    #[must_use]
     pub fn usable_entries(&self) -> &[MemMapEntry] {
         &self.usable_entries[..self.usable_entry_count]
     }
@@ -63,6 +65,11 @@ impl<const N: usize> MemMapEntries<N> {
 
 /// Initializes the memory mapping for the kernel, mapping the physical memory
 /// in a new page table and switching to it.
+///
+/// # Panics
+///
+/// This function will panic if the memory map entries are not valid or if the
+/// mapping fails.
 pub unsafe fn map_memory(boot_info: &BootInfo) {
     let mem_map = &boot_info.mem_map;
 

@@ -1,4 +1,4 @@
-use aarch64_cpu::registers::*;
+use aarch64_cpu::registers::{FAR_EL1, Readable};
 
 use crate::irq::irq_chip;
 use crate::mem::paging::table::{PageTable, TableKind};
@@ -59,8 +59,9 @@ unsafe extern "C" {
 }
 
 /// Returns the address of the exception vector table.
+#[must_use]
 pub unsafe fn exception_vector_table() -> VirtAddr {
-    unsafe { VirtAddr::new_unchecked(&__exception_vectors as *const _ as usize) }
+    unsafe { VirtAddr::new_unchecked(&raw const __exception_vectors as usize) }
 }
 
 /// Registers used for returning from an interrupt or exception.
@@ -109,7 +110,7 @@ pub struct ScratchRegs {
     pub x16: usize,
     pub x17: usize,
     pub x18: usize,
-    pub _padding: usize,
+    _padding: usize,
 }
 
 impl ScratchRegs {
@@ -183,12 +184,17 @@ impl InterruptFrame {
     pub fn set_stack_pointer(&mut self, sp: usize) {
         self.iret.sp_el0 = sp;
     }
+
     pub fn set_instr_pointer(&mut self, pc: usize) {
         self.iret.elr_el1 = pc;
     }
+
+    #[must_use]
     pub fn stack_pointer(&self) -> usize {
         self.iret.sp_el0
     }
+
+    #[must_use]
     pub fn instr_pointer(&self) -> usize {
         self.iret.elr_el1
     }
@@ -337,6 +343,7 @@ pub unsafe extern "C" fn enter_usermode() -> ! {
     ));
 }
 
+#[must_use]
 pub fn exception_code(esr: usize) -> u8 {
     ((esr >> 26) & 0x3f) as u8
 }
@@ -372,14 +379,14 @@ exception_stack!(__sync_current_el_spx, |stack| {
         let faulted_addr = unsafe { VirtAddr::new_unchecked(FAR_EL1.get() as usize) };
         log::error!("Faulted addr: {faulted_addr}");
 
-        let iss = stack.iret.esr_el1 & 0x1ffffff;
+        let iss = stack.iret.esr_el1 & 0x01ff_ffff;
         let wn_r = (iss >> 6) & 1 == 1;
         let dfsc = iss & 0x3f;
 
         match dfsc {
-            0b000000..=0b000011 => page_not_present(faulted_addr, wn_r, dfsc),
-            0b001101..=0b001111 => permission_fault(faulted_addr, wn_r, dfsc),
-            0b001001..=0b001011 => access_flag_fault(faulted_addr, wn_r, dfsc),
+            0b00_0000..=0b00_0011 => page_not_present(faulted_addr, wn_r, dfsc),
+            0b00_1101..=0b00_1111 => permission_fault(faulted_addr, wn_r, dfsc),
+            0b00_1001..=0b00_1011 => access_flag_fault(faulted_addr, wn_r, dfsc),
             _ => unhandled_fault(faulted_addr, wn_r, dfsc),
         }
     }
@@ -398,7 +405,7 @@ exception_stack!(__serr_current_el_spx, |stack| {
 });
 exception_stack!(__sync_lower_el_a64, |stack| {
     match exception_code(stack.iret.esr_el1) {
-        0b010101 => {
+        0b01_0101 => {
             log::debug!("Syscall!");
         }
         code => {

@@ -14,10 +14,14 @@ use crate::{
         units::{PhysAddr, VirtAddr},
     },
     syscall::errno::Errno,
+    util::{DebugCheckedPanic, DebugPanic},
 };
 
 use crate::arch::Arch;
-use props::*;
+use props::{
+    AllocateBuffer, GetDepth, GetFirmwareRevision, GetPhysicalSize, GetPitch, SetDepth,
+    SetPhysicalSize, SetPixelOrder, SetVirtualSize,
+};
 
 use super::{dma_alloc, dma_free};
 
@@ -58,28 +62,39 @@ pub struct MailboxError;
 pub struct MailboxMessage(u32);
 
 impl MailboxMessage {
-    pub fn encode(buffer: *mut MailboxBuffer, channel: MailboxChannel) -> Self {
-        let addr: u32 = (buffer as usize - crate::HHDM_PHYSICAL_OFFSET) as u32;
-        assert_eq!(addr & 0b1111, 0, "buffer is not aligned to 16 bytes");
-        Self(addr | (channel as u32))
+    pub fn encode(
+        buffer: *mut MailboxBuffer,
+        channel: MailboxChannel,
+    ) -> Result<Self, MailboxError> {
+        let addr = u32::try_from(buffer as usize - crate::HHDM_PHYSICAL_OFFSET)
+            .map_err(|_| MailboxError)
+            .debug_expect("Mailbox buffer address is not a valid HHDM physical address")?;
+        debug_assert_eq!(addr & 0b1111, 0, "buffer is not aligned to 16 bytes");
+        Ok(Self(addr | (channel as u32)))
     }
 
+    #[must_use]
     pub fn from_raw(raw: u32) -> Self {
         Self(raw)
     }
 
+    #[must_use]
     pub fn decode(self) -> *mut MailboxBuffer {
         ((self.payload() as usize) + crate::HHDM_PHYSICAL_OFFSET) as *mut MailboxBuffer
     }
 
+    #[must_use]
     pub fn channel(&self) -> MailboxChannel {
-        MailboxChannel::try_from((self.0 & 0b1111) as u32).unwrap()
+        MailboxChannel::try_from((self.0 & 0b1111) as u32)
+            .debug_checked_expect("Invalid mailbox channel")
     }
 
+    #[must_use]
     pub fn payload(&self) -> u32 {
         self.0 & !0b1111
     }
 
+    #[must_use]
     pub fn raw(&self) -> u32 {
         self.0
     }
@@ -115,10 +130,12 @@ impl MailboxBuffer {
     pub const SIZE_IDX: usize = 0;
     pub const CODE_IDX: usize = 1;
 
+    #[must_use]
     pub fn buffer_size(&self) -> u32 {
         self.props[Self::SIZE_IDX] >> 2
     }
 
+    #[must_use]
     pub fn request_code(&self) -> u32 {
         self.props[Self::CODE_IDX]
     }
@@ -137,10 +154,12 @@ impl MailboxRequest {
         MailboxRequest { buf, index: 2 }
     }
 
+    #[allow(clippy::cast_possible_truncation)]
     pub fn encode<T: MailboxProperty>(self, prop: T) -> Self {
         let mut this = self;
         this = this.int(T::TAG);
         let max_size = usize::max(size_of::<T>(), size_of::<T::Response>());
+
         this = this.int(max_size as u32);
         this = this.int(0); // request
         let start = this.index as usize;
@@ -162,6 +181,7 @@ impl MailboxRequest {
         self
     }
 
+    #[must_use = "this will leak memory if the buffer is not consumed"]
     pub fn finish(self) -> *mut MailboxBuffer {
         unsafe {
             (&mut *self.buf)[MailboxBuffer::SIZE_IDX] = (self.index + 1) << 2; // add 1 for the zero-tag at the end
@@ -177,6 +197,7 @@ pub struct MailboxResponse {
 }
 
 impl MailboxResponse {
+    #[must_use]
     pub fn decode<T: MailboxProperty>(&self) -> Option<T::Response> {
         let buf = unsafe { &*self.buf };
         let size = buf.buffer_size() as usize;
@@ -220,13 +241,31 @@ impl Mailbox {
     const STATUS: usize = 0x18;
     const WRITE: usize = 0x20;
 
+    /// Parses the mailbox from the FDT.
     pub fn parse(fdt: &Fdt) -> Result<Self, Errno> {
-        let mbox = fdt.find_compatible(&["brcm,bcm2835-mbox"]).unwrap();
-        let phandle = mbox.property("phandle").unwrap().as_usize().unwrap() as u32;
-        let mut regions = mbox.reg().unwrap();
-        let region = regions.next().unwrap();
-        assert!(regions.next().is_none());
-        let mmio_addr = get_mmio_addr(fdt, &region).unwrap();
+        let Some(mbox) = fdt.find_compatible(&["brcm,bcm2835-mbox"]) else {
+            return Err(Errno::EINVAL);
+        };
+
+        let Some(phandle) = mbox.property("phandle") else {
+            return Err(Errno::EINVAL);
+        };
+
+        let Some(phandle) = phandle.as_usize() else {
+            return Err(Errno::EINVAL);
+        };
+
+        let Ok(phandle) = u32::try_from(phandle) else {
+            return Err(Errno::EINVAL);
+        };
+
+        let Some(region) = mbox.reg().and_then(|mut r| r.next()) else {
+            return Err(Errno::EINVAL);
+        };
+
+        let Some(mmio_addr) = get_mmio_addr(fdt, &region) else {
+            return Err(Errno::EINVAL);
+        };
 
         Ok(Self {
             phandle: Phandle::from(phandle),
@@ -234,19 +273,42 @@ impl Mailbox {
         })
     }
 
+    /// Returns the status of the mailbox.
+    ///
+    /// # Panics
+    ///
+    /// This function will panic if the read operation fails.
+    #[must_use]
     pub fn status(&self) -> MailboxStatus {
         MailboxStatus::from_bits_truncate(unsafe {
             self.base.add_bytes(Self::STATUS).read_volatile().unwrap()
         })
     }
 
+    /// Calls the mailbox with a request and channel, returning the response.
+    ///
+    /// # Safety
+    ///
+    /// This function is unsafe because it directly interacts with hardware and assumes that the mailbox is correctly configured.
+    ///
+    /// # Returns
+    ///
+    /// Returns `Ok(MailboxResponse)` if the call was successful, or `Err(MailboxError)` if there was an error.
+    ///
+    /// # Panics
+    ///
+    /// This function will panic if the mailbox is full or if MMIO operations fail.
     pub unsafe fn call(
         &mut self,
         request: MailboxRequest,
         channel: MailboxChannel,
     ) -> Result<MailboxResponse, MailboxError> {
         let buf = request.finish();
-        let message = MailboxMessage::encode(buf, channel);
+        let Ok(message) = MailboxMessage::encode(buf, channel) else {
+            // don't leak memory
+            dma_free(buf);
+            return Err(MailboxError);
+        };
 
         unsafe {
             asm!("dsb ishst");
@@ -262,7 +324,7 @@ impl Mailbox {
             self.base
                 .add_bytes(Self::WRITE)
                 .write_volatile(message.raw())
-                .unwrap()
+                .unwrap();
         };
 
         // wait for response
@@ -287,7 +349,7 @@ impl Mailbox {
         let code = unsafe { (*buf).request_code() };
         let response = MailboxResponse { buf };
 
-        if code & 0x80000000 == 0x80000000 {
+        if code & 0x8000_0000 == 0x8000_0000 {
             Ok(response)
         } else {
             Err(MailboxError)
@@ -295,6 +357,11 @@ impl Mailbox {
     }
 }
 
+/// Initializes the GPU framebuffer.
+///
+/// # Panics
+///
+/// This function will panic if the mailbox call fails or if the framebuffer cannot be initialized.
 pub fn init(fdt: &Fdt) {
     let mut mbox = Mailbox::parse(fdt).unwrap();
     log::debug!("mailbox @ {}", mbox.base);

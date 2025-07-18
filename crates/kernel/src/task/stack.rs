@@ -21,6 +21,7 @@ impl Stack {
         Ok(Self { base })
     }
 
+    #[must_use]
     pub fn initial_top(&self) -> *mut u8 {
         unsafe {
             self.base
@@ -31,6 +32,7 @@ impl Stack {
     }
 
     #[allow(clippy::len_without_is_empty)]
+    #[must_use]
     pub const fn len(&self) -> usize {
         Arch::PAGE_SIZE * 16
     }

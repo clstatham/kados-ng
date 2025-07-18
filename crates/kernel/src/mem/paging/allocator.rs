@@ -21,6 +21,11 @@ pub fn init_kernel_frame_allocator(boot_info: &'static BootInfo) {
 }
 
 /// Returns a guard to the global kernel frame allocator.
+///
+/// # Panics
+///
+/// This function will panic if the kernel frame allocator has not been initialized.
+#[must_use]
 pub fn kernel_frame_allocator<'a>() -> MutexGuard<'a, FrameAllocator> {
     KERNEL_FRAME_ALLOCATOR
         .get()
@@ -39,6 +44,7 @@ pub enum FrameAllocator {
 
 impl FrameAllocator {
     /// Creates a new frame allocator using the boot memory map.
+    #[must_use]
     pub fn boot(areas: &'static [MemMapEntry]) -> Self {
         Self::Boot(BumpFrameAllocator::new(areas))
     }
@@ -107,6 +113,7 @@ impl FrameAllocator {
 
     /// Returns the number of frames currently allocated.
     /// Only returns a value for the bump allocator, as the buddy system allocator does not track usage.
+    #[must_use]
     pub fn usage(&self) -> Option<FrameCount> {
         match self {
             Self::Boot(bump) => Some(bump.usage()),
@@ -136,6 +143,7 @@ impl KernelFrameAllocator {
 
     /// Returns the number of frames currently allocated in the global kernel frame allocator.
     /// Only returns a value for the bump allocator, as the buddy system allocator does not track usage.
+    #[must_use]
     pub fn usage(&self) -> Option<FrameCount> {
         kernel_frame_allocator().usage()
     }
@@ -150,6 +158,7 @@ pub struct BumpFrameAllocator {
 
 impl BumpFrameAllocator {
     /// Creates a new bump frame allocator with the given memory map entries for usable memory.
+    #[must_use]
     pub fn new(areas: &'static [MemMapEntry]) -> Self {
         Self {
             original: areas,
@@ -182,6 +191,7 @@ impl BumpFrameAllocator {
     }
 
     /// Returns the number of frames currently allocated in the bump allocator.
+    #[must_use]
     pub fn usage(&self) -> FrameCount {
         let mut total = 0;
         let num_consumed = self.original.len() - self.areas.len();
@@ -201,6 +211,7 @@ pub struct BuddySystemFrameAllocator {
 
 impl BuddySystemFrameAllocator {
     /// Creates a new buddy system frame allocator with no frames added.
+    #[must_use]
     pub const fn const_default() -> Self {
         Self {
             allocator: buddy_system_allocator::FrameAllocator::new(),
@@ -208,6 +219,7 @@ impl BuddySystemFrameAllocator {
     }
 
     /// Creates a new buddy system frame allocator with the given memory map entries for usable memory.
+    #[must_use]
     pub fn new(areas: &'static [MemMapEntry]) -> Self {
         let mut allocator = buddy_system_allocator::FrameAllocator::new();
         for area in areas {

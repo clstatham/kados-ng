@@ -12,9 +12,7 @@ use spin::Once;
 use embedded_graphics::pixelcolor::Rgb888;
 
 use crate::{
-    arch::clean_data_cache,
-    mem::units::VirtAddr,
-    sync::{IrqMutex, IrqMutexGuard},
+    arch::clean_data_cache, mem::units::VirtAddr, sync::IrqMutex, util::DebugCheckedPanic,
 };
 
 /// Represents a pixel color in the framebuffer.
@@ -42,12 +40,14 @@ impl FbChar {
     };
 
     /// Creates a new [`FbChar`] with the given character and foreground color.
+    #[must_use]
     pub fn new(char: u8, fg: Color) -> Self {
         Self { char, fg }
     }
 
     /// Converts the [`FbChar`] to a [`Text`] object for rendering.
-    pub fn to_text(
+    #[must_use]
+    pub fn as_text(
         &'_ self,
         top_left: Point,
         x: usize,
@@ -74,7 +74,7 @@ pub struct FrameBuffer {
     height: usize,
     bpp: usize,
     back_buffer: Box<[u32]>,
-    text_buf: Box<[[Option<FbChar>; TEXT_BUFFER_WIDTH]; TEXT_BUFFER_HEIGHT]>,
+    text_buf: Box<[[Option<FbChar>; TEXT_BUFFER_WIDTH]]>, // TEXT_BUFFER_WIDTH x TEXT_BUFFER_HEIGHT
     text_cursor_x: usize,
     text_cursor_y: usize,
     text_fgcolor: Color,
@@ -82,26 +82,31 @@ pub struct FrameBuffer {
 
 impl FrameBuffer {
     /// Returns the width of the framebuffer in pixels.
+    #[must_use]
     pub fn width(&self) -> usize {
         self.width
     }
 
     /// Returns the height of the framebuffer in pixels.
+    #[must_use]
     pub fn height(&self) -> usize {
         self.height
     }
 
     /// Returns the number of bits per pixel.
+    #[must_use]
     pub fn bpp(&self) -> usize {
         self.bpp
     }
 
     /// Returns the area of the framebuffer in pixels.
+    #[must_use]
     pub fn size_pixels(&self) -> usize {
         self.width * self.height
     }
 
     /// Returns the size of the framebuffer in bytes.
+    #[must_use]
     pub fn size_bytes(&self) -> usize {
         self.size_bytes
     }
@@ -121,8 +126,8 @@ impl FrameBuffer {
         for line in 0..TEXT_BUFFER_HEIGHT {
             for col in 0..TEXT_BUFFER_WIDTH {
                 if let Some(ch) = self.text_buf[line][col] {
-                    let text = ch.to_text(self.bounding_box().top_left, col, line);
-                    text.draw(self).unwrap();
+                    let text = ch.as_text(self.bounding_box().top_left, col, line);
+                    text.draw(self).ok();
                 }
             }
         }
@@ -130,7 +135,7 @@ impl FrameBuffer {
 
     /// Clears the framebuffer by filling it with black pixels.
     pub fn clear_pixels(&mut self) {
-        self.clear(Color::BLACK).unwrap();
+        self.clear(Color::BLACK).debug_checked_unwrap(); // should never fail
     }
 
     /// Returns a mutable slice of the framebuffer's pixel data.
@@ -205,6 +210,7 @@ impl FrameBuffer {
         }
     }
 
+    #[allow(clippy::unused_self)]
     fn cursor_color_hook(&mut self) {}
 
     /// Backspaces the last character in the text buffer.
@@ -221,7 +227,7 @@ impl FrameBuffer {
     /// Writes a string to the framebuffer's text buffer at the current cursor position.
     pub fn write_string(&mut self, s: &str) {
         for byte in s.bytes() {
-            self.write_byte(byte)
+            self.write_byte(byte);
         }
     }
 
@@ -300,7 +306,7 @@ impl FrameBuffer {
     /// Clears the entire text buffer.
     pub fn clear_text(&mut self) {
         for row in 0..TEXT_BUFFER_HEIGHT {
-            self.clear_row(row)
+            self.clear_row(row);
         }
         self.cursor_color_hook();
     }
@@ -347,7 +353,7 @@ impl DrawTarget for FrameBuffer {
     where
         I: IntoIterator<Item = Pixel<Self::Color>>,
     {
-        for Pixel(coord, color) in pixels.into_iter() {
+        for Pixel(coord, color) in pixels {
             let (x, y) = coord.into();
             if (0..self.width as i32).contains(&x) && (0..self.height as i32).contains(&y) {
                 self.set_pixel(x as usize, y as usize, color);
@@ -375,15 +381,22 @@ impl OriginDimensions for FrameBuffer {
 pub static FRAMEBUFFER: Once<IrqMutex<FrameBuffer>> = Once::new();
 
 /// Returns a guard to the global framebuffer instance.
-pub fn fb<'a>() -> IrqMutexGuard<'a, FrameBuffer> {
-    FRAMEBUFFER.get().unwrap().lock()
+pub fn with_fb<R>(f: impl FnOnce(&mut FrameBuffer) -> R) -> Option<R> {
+    let fb = FRAMEBUFFER.get()?;
+    let result = {
+        let mut fb = fb.lock();
+        f(&mut fb)
+    };
+    Some(result)
 }
 
 /// Renders the global framebuffer's text buffer to the screen.
 pub fn render_text_buf() {
-    fb().clear_pixels();
-    fb().render_text_buf();
-    fb().present();
+    with_fb(|fb| {
+        fb.clear_pixels();
+        fb.render_text_buf();
+        fb.present();
+    });
 }
 
 /// Prints a formatted string to the framebuffer's text buffer.
@@ -436,14 +449,14 @@ pub fn init() {
         return;
     };
 
-    let framebuf = FrameBuffer {
+    let mut framebuf = FrameBuffer {
         start_addr: base,
         size_bytes,
         width,
         height,
         bpp,
         back_buffer: alloc::vec![0; size_bytes / size_of::<u32>()].into_boxed_slice(),
-        text_buf: Box::new([[None; TEXT_BUFFER_WIDTH]; TEXT_BUFFER_HEIGHT]),
+        text_buf: alloc::vec![[None; TEXT_BUFFER_WIDTH]; TEXT_BUFFER_HEIGHT].into_boxed_slice(),
         text_cursor_x: 0,
         text_cursor_y: 0,
         text_fgcolor: Color::WHITE,
@@ -455,11 +468,11 @@ pub fn init() {
         framebuf.start_addr.add_bytes(framebuf.size_bytes())
     );
 
-    FRAMEBUFFER.call_once(|| IrqMutex::new(framebuf));
+    framebuf.clear_pixels();
+    framebuf.clear_text();
+    framebuf.set_text_fgcolor_default();
 
-    fb().set_text_fgcolor_default();
-    fb().clear_pixels();
-    fb().clear_text();
+    FRAMEBUFFER.call_once(|| IrqMutex::new(framebuf));
 
     log::info!("Framebuffer resolution: {width}x{height}");
 }

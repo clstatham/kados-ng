@@ -1,11 +1,12 @@
 use alloc::boxed::Box;
-use fdt::{Fdt, node::FdtNode};
+use fdt::{Fdt, node::FdtNode, standard_nodes::Compatible};
 use spin::Once;
 
 use crate::{
     arch::{Arch, Architecture},
     fdt::Phandle,
     sync::{IrqMutex, IrqMutexGuard},
+    util::DebugCheckedPanic,
 };
 
 /// A static reference to the IRQ chip.
@@ -25,6 +26,10 @@ pub fn init(fdt: &Fdt) {
 /// If you need to hold the guard across a context switch,
 /// you can (unsafely) call `force_unlock()` on the guard
 /// as the very last thing before returning.
+///
+/// # Panics
+///
+/// Panics if the IRQ chip has not been initialized yet.
 pub fn irq_chip<'a>() -> IrqMutexGuard<'a, IrqChipDescriptor> {
     #[allow(static_mut_refs)]
     IRQ_CHIP.get().expect("IRQ chip not initialized").lock()
@@ -47,7 +52,7 @@ pub unsafe fn register_irq(irq: Irq, handler: impl IrqHandler) {
     irq_chip.descs[irq.as_usize()]
         .handler
         .as_mut()
-        .unwrap()
+        .debug_checked_unwrap() // should never fail here
         .post_register_hook(irq);
 
     log::debug!("Registered IRQ handler for {}", irq);
@@ -55,7 +60,7 @@ pub unsafe fn register_irq(irq: Irq, handler: impl IrqHandler) {
 
 /// Enables the given IRQ.
 pub fn enable_irq(irq: Irq) {
-    irq_chip().enable_irq(irq)
+    irq_chip().enable_irq(irq);
 }
 
 int_wrapper!(pub Irq: u32);
@@ -181,7 +186,7 @@ pub struct IrqChipDescriptor {
     pub chip: Box<dyn IrqChip>,
 
     /// An array of IRQ handler descriptors.
-    pub descs: Box<[IrqHandlerDescriptor; 1024]>,
+    pub descs: Box<[IrqHandlerDescriptor]>,
 }
 
 impl IrqChipDescriptor {
@@ -189,22 +194,41 @@ impl IrqChipDescriptor {
     pub fn new(fdt: &Fdt) -> Self {
         let mut this = Self {
             phandle: Phandle::default(),
-            descs: Box::new([IrqHandlerDescriptor::INIT; 1024]),
+            descs: core::iter::repeat_with(|| IrqHandlerDescriptor::INIT)
+                .take(1024)
+                .collect::<alloc::vec::Vec<_>>()
+                .into_boxed_slice(),
             chip: Box::new(Null),
         };
 
         // find the first interrupt controller node that is compatible with the architecture
         for node in fdt.all_nodes() {
             if node.property("interrupt-controller").is_some() {
-                let compatible = node.compatible().unwrap().first();
+                let Some(compatible) = node.compatible().map(Compatible::first) else {
+                    continue;
+                };
 
                 let Some(chip) = Arch::new_irq_chip(compatible) else {
                     continue;
                 };
 
-                this.phandle =
-                    Phandle::from(node.property("phandle").unwrap().as_usize().unwrap() as u32);
-                let intr_cells = node.interrupt_cells().unwrap();
+                let Some(phandle) = node.property("phandle") else {
+                    log::error!("IRQ chip node {} has no phandle", node.name);
+                    continue;
+                };
+
+                let Some(phandle) = phandle.as_usize() else {
+                    log::error!("IRQ chip node {} has invalid phandle", node.name);
+                    continue;
+                };
+
+                let Ok(phandle) = u32::try_from(phandle) else {
+                    log::error!("IRQ chip node {} has invalid phandle", node.name);
+                    continue;
+                };
+
+                this.phandle = Phandle::from(phandle);
+                let intr_cells = node.interrupt_cells().unwrap_or(1);
 
                 log::debug!(
                     "{}, compatible = {:?}, intr_cells = {:#x}, phandle = {:#x}",
@@ -260,6 +284,7 @@ impl IrqChipDescriptor {
     }
 
     /// Translates the IRQ data from the device tree into an IRQ number.
+    #[must_use]
     pub fn translate_irq(&self, irq_data: &[u32]) -> Option<Irq> {
         let irq_data = match irq_data.len() {
             1 => IrqCell::L1(irq_data[0]),
@@ -279,17 +304,15 @@ impl IrqChipDescriptor {
 /// Returns the parent interrupt node for the given FDT node.
 fn interrupt_parent<'a>(fdt: &'a Fdt<'a>, node: &'a FdtNode<'a, 'a>) -> Option<FdtNode<'a, 'a>> {
     node.interrupt_parent()
-        .or_else(|| fdt.find_node("/soc").and_then(|soc| soc.interrupt_parent()))
-        .or_else(|| fdt.find_node("/").and_then(|root| root.interrupt_parent()))
+        .or_else(|| fdt.find_node("/soc").and_then(FdtNode::interrupt_parent))
+        .or_else(|| fdt.find_node("/").and_then(FdtNode::interrupt_parent))
 }
 
 /// Returns the interrupt cell for the given FDT node and index.
+#[must_use]
 pub fn get_interrupt(fdt: &Fdt, node: &FdtNode, idx: usize) -> Option<IrqCell> {
-    let interrupts = node.property("interrupts").unwrap();
-    let parent_intr_cells = interrupt_parent(fdt, node)
-        .unwrap()
-        .interrupt_cells()
-        .unwrap();
+    let interrupts = node.property("interrupts")?;
+    let parent_intr_cells = interrupt_parent(fdt, node)?.interrupt_cells()?;
     let mut intr = interrupts
         .value
         .array_chunks::<4>()

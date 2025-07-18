@@ -14,6 +14,11 @@ use super::{addr_space::AddrSpaceLock, stack::Stack, switch::EMPTY_CR3};
 
 pub static CONTEXTS: RwLock<BTreeSet<ContextRef>> = RwLock::new(BTreeSet::new());
 
+/// Initializes the kernel context.
+///
+/// # Panics
+///
+/// This function will panic if the kernel context cannot be created or if the frame allocator fails to allocate a frame.
 pub fn init() {
     let mut cx = Context::new().expect("Failed to create kernel_main context");
 
@@ -97,6 +102,7 @@ impl PartialOrd for ContextRef {
     }
 }
 
+#[must_use]
 pub fn current() -> Option<Arc<RwSpinlock<Context>>> {
     CpuLocalBlock::current()
         .and_then(|block| block.switch_state.with_context(|cx| cx.map(Arc::clone)))

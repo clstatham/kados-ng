@@ -1,6 +1,6 @@
 use core::arch::asm;
 
-use aarch64_cpu::registers::*;
+use aarch64_cpu::registers::{Readable, Writeable, TPIDR_EL1, ReadWriteable, DAIF};
 use alloc::boxed::Box;
 use serial::PERIPHERAL_BASE;
 
@@ -81,28 +81,30 @@ impl Architecture for AArch64 {
 
     const PAGE_FLAG_HUGE: usize = 0;
 
-    #[inline(always)]
+    #[inline]
     unsafe fn init_pre_kernel_main() {}
 
     unsafe fn init_mem(mapper: &mut PageTable) {
+        const PERIPHERAL_SIZE: usize = 0x200_0000;
+
         let frame = PhysAddr::new_canonical(PERIPHERAL_BASE);
         let page = frame.as_hhdm_virt();
 
-        const PERIPHERAL_SIZE: usize = 0x200_0000;
+        
 
         unsafe {
-            let mut mapped = 0;
-            while mapped < PERIPHERAL_SIZE {
+            let mut bytes_mapped = 0;
+            while bytes_mapped < PERIPHERAL_SIZE {
                 mapper
                     .map_to(
-                        page.add_bytes(mapped),
-                        frame.add_bytes(mapped),
+                        page.add_bytes(bytes_mapped),
+                        frame.add_bytes(bytes_mapped),
                         BlockSize::Page4KiB,
                         PageFlags::new_device(),
                     )
                     .unwrap()
                     .ignore();
-                mapped += BlockSize::Page4KiB.size();
+                bytes_mapped += BlockSize::Page4KiB.size();
             }
         };
 
@@ -130,12 +132,12 @@ impl Architecture for AArch64 {
 
     unsafe fn init_syscalls() {}
 
-    #[inline(always)]
+    #[inline]
     unsafe fn enable_interrupts() {
         DAIF.modify(DAIF::I::CLEAR);
     }
 
-    #[inline(always)]
+    #[inline]
     unsafe fn disable_interrupts() {
         DAIF.modify(DAIF::D::SET);
         DAIF.modify(DAIF::A::SET);
@@ -147,7 +149,7 @@ impl Architecture for AArch64 {
         !DAIF.is_set(DAIF::I) // IRQ flag NOT masked = IRQs enabled
     }
 
-    #[inline(always)]
+    #[inline]
     unsafe fn invalidate_page(addr: VirtAddr) {
         unsafe {
             asm!("
@@ -160,12 +162,12 @@ impl Architecture for AArch64 {
         }
     }
 
-    #[inline(always)]
+    #[inline]
     unsafe fn invalidate_all() {
         unsafe { asm!("dsb ishst", "tlbi vmalle1is", "dsb ish", "isb") }
     }
 
-    #[inline(always)]
+    #[inline]
     unsafe fn current_page_table(kind: TableKind) -> PhysAddr {
         let addr: usize;
         unsafe {
@@ -177,7 +179,7 @@ impl Architecture for AArch64 {
         PhysAddr::new_canonical(addr)
     }
 
-    #[inline(always)]
+    #[inline]
     unsafe fn set_current_page_table(addr: PhysAddr, kind: TableKind) {
         unsafe {
             match kind {
@@ -212,7 +214,7 @@ impl Architecture for AArch64 {
     }
 
 
-    #[inline(always)]
+    #[inline]
     fn stack_pointer() -> usize {
         let sp: usize;
         unsafe {
@@ -221,7 +223,7 @@ impl Architecture for AArch64 {
         sp
     }
 
-    #[inline(always)]
+    #[inline]
     fn frame_pointer() -> usize {
         let fp: usize;
         unsafe {
@@ -257,17 +259,17 @@ impl Architecture for AArch64 {
         qemu_exit::AArch64::new().exit(code)
     }
 
-    #[inline(always)]
+    #[inline]
     fn halt() {
         unsafe { asm!("wfe") }
     }
 
-    #[inline(always)]
+    #[inline]
     fn nop() {
         unsafe { asm!("nop") }
     }
 
-    #[inline(always)]
+    #[inline]
     fn breakpoint() {
         unsafe { asm!("brk #0xf000") }
     }

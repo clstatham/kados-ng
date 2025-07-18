@@ -13,6 +13,7 @@ use crate::{
     cpu_local::CpuLocalBlock,
     mem::units::PhysAddr,
     task::context::Status,
+    util::DebugCheckedPanic,
 };
 
 use super::context::{CONTEXTS, Context, ContextRef, current};
@@ -20,8 +21,11 @@ use super::context::{CONTEXTS, Context, ContextRef, current};
 pub static SWITCH_LOCK: AtomicBool = AtomicBool::new(false);
 
 pub static EMPTY_CR3: Once<PhysAddr> = Once::new();
+
+#[inline]
+#[must_use]
 pub fn empty_cr3() -> PhysAddr {
-    *EMPTY_CR3.get().unwrap()
+    *EMPTY_CR3.get().debug_checked_unwrap()
 }
 
 pub enum SwitchResult {
@@ -54,17 +58,23 @@ impl CpuLocalSwitchState {
         *self.idle_context.borrow_mut() = Some(new_cx);
     }
 
+    #[inline]
+    #[must_use]
     pub fn idle_context(&self) -> Arc<RwSpinlock<Context>> {
         self.idle_context
             .borrow()
             .as_ref()
-            .expect("No idle context")
+            .debug_checked_expect("No idle context")
             .clone()
     }
 }
 
+#[inline]
 pub unsafe extern "C" fn switch_finish_hook() {
-    if let Some(guards) = CpuLocalBlock::current().unwrap().switch_state.result.take() {
+    let Some(current) = CpuLocalBlock::current() else {
+        unreachable!();
+    };
+    if let Some(guards) = current.switch_state.result.take() {
         drop(guards);
     } else {
         unreachable!();
@@ -78,15 +88,14 @@ pub unsafe extern "C" fn switch_finish_hook() {
 }
 
 pub unsafe extern "C" fn switch_arch_hook() {
-    let block = CpuLocalBlock::current().unwrap();
+    let block = CpuLocalBlock::current().unwrap_or_else(|| unreachable!());
 
     let current_addr_space = block.current_addr_space.borrow();
     let next_addr_space = block.next_addr_space.take();
 
     let is_same = match (&*current_addr_space, &next_addr_space) {
         (Some(prev), Some(next)) => Arc::ptr_eq(prev, next),
-        (Some(_), None) => false,
-        (None, Some(_)) => false,
+        (Some(_), None) | (None, Some(_)) => false,
         (None, None) => true,
     };
     if is_same {
@@ -117,6 +126,11 @@ fn is_runnable(cx: &mut Context) -> bool {
     matches!(cx.status, Status::Runnable)
 }
 
+/// Switches to the next runnable task.
+///
+/// # Panics
+///
+/// This function will panic if there are no runnable tasks available or if the current context is not set.
 pub fn switch() -> SwitchResult {
     let block = CpuLocalBlock::current().unwrap();
 

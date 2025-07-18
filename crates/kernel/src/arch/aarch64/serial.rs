@@ -55,7 +55,7 @@ impl GpioUart {
             write_volatile(CM_UARTDIV, 3); // DIVI = 3
             write_volatile(CM_UARTCTL, 0x0000_2160); // ENAB | BUSY | SRC=PLLD | KILL=0
             for _ in 0..150 {
-                core::arch::asm!("nop")
+                core::arch::asm!("nop");
             } // ~150 core cycles
 
             /* 1 ─── Pin‑mux: GPIO 14/15 to ALT0 (TXD0/RXD0) */
@@ -66,11 +66,11 @@ impl GpioUart {
             // disable pulls
             write_volatile(GPPUD, 0);
             for _ in 0..150 {
-                core::arch::asm!("nop")
+                core::arch::asm!("nop");
             }
             write_volatile(GPPUDCLK0, (1 << 14) | (1 << 15));
             for _ in 0..150 {
-                core::arch::asm!("nop")
+                core::arch::asm!("nop");
             }
             write_volatile(GPPUDCLK0, 0);
 
@@ -106,7 +106,7 @@ impl GpioUart {
                     break;
                 }
             }
-            DR.write_volatile(c as u32);
+            DR.write_volatile(u32::from(c));
         }
     }
 

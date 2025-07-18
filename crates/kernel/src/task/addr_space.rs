@@ -12,9 +12,10 @@ pub struct AddrSpace {
 }
 
 impl AddrSpace {
+    /// Returns the current address space for the current CPU.
     pub fn current() -> Result<Arc<AddrSpaceLock>, Errno> {
         CpuLocalBlock::current()
-            .unwrap()
+            .ok_or(Errno::ESRCH)?
             .current_addr_space
             .borrow()
             .clone()

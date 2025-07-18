@@ -1,6 +1,11 @@
 use core::time::Duration;
 
-use aarch64_cpu::{asm::barrier, registers::*};
+use aarch64_cpu::{
+    asm::barrier,
+    registers::{
+        CNTFRQ_EL0, CNTP_CTL_EL0, CNTP_TVAL_EL0, CNTPCT_EL0, ReadWriteable, Readable, Writeable,
+    },
+};
 use fdt::Fdt;
 
 use crate::{
@@ -8,7 +13,7 @@ use crate::{
     task::switch::switch,
 };
 
-/// Initializes the generic timer for the AArch64 architecture.
+/// Initializes the generic timer for the `AArch64` architecture.
 pub fn init(_fdt: &Fdt) {
     let mut timer = GenericTimer::default();
     timer.init();
@@ -17,7 +22,7 @@ pub fn init(_fdt: &Fdt) {
     unsafe { register_irq(irq, timer) };
 }
 
-/// The generic timer for the AArch64 architecture.
+/// The generic timer for the `AArch64` architecture.
 #[derive(Debug, Default)]
 pub struct GenericTimer {
     pub clk_freq: u32,
@@ -31,7 +36,7 @@ impl GenericTimer {
         self.clk_freq = clk_freq as u32;
         self.reload_count = clk_freq as u32 / 100;
 
-        CNTP_TVAL_EL0.set(self.reload_count as u64);
+        CNTP_TVAL_EL0.set(u64::from(self.reload_count));
 
         CNTP_CTL_EL0.modify(CNTP_CTL_EL0::ENABLE::SET);
         CNTP_CTL_EL0.modify(CNTP_CTL_EL0::IMASK::CLEAR);
@@ -48,7 +53,7 @@ impl GenericTimer {
     pub fn reload_count(&mut self) {
         CNTP_CTL_EL0.modify(CNTP_CTL_EL0::ENABLE::SET);
         CNTP_CTL_EL0.modify(CNTP_CTL_EL0::IMASK::CLEAR);
-        CNTP_TVAL_EL0.set(self.reload_count as u64)
+        CNTP_TVAL_EL0.set(u64::from(self.reload_count));
     }
 }
 
@@ -61,6 +66,7 @@ impl IrqHandler for GenericTimer {
 }
 
 /// Returns the current uptime of the system.
+#[must_use]
 pub fn uptime() -> Duration {
     barrier::isb(barrier::SY);
     let ticks = CNTPCT_EL0.get();
@@ -74,7 +80,7 @@ pub fn uptime() -> Duration {
 }
 
 /// Spins for the specified duration, busy-waiting until the duration has elapsed.
-#[inline(always)]
+#[inline]
 pub fn spin_for(dur: Duration) {
     let stamp = uptime();
     crate::util::spin_while(|| uptime() - stamp < dur);

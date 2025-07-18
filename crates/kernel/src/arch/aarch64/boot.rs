@@ -45,7 +45,7 @@ unsafe fn memzero(start: usize, end: usize) {
         out("x1") _,
         out("x2") _,
         out("x3") _,
-        )
+        );
     }
 }
 
@@ -58,8 +58,8 @@ unsafe fn memzero(start: usize, end: usize) {
 pub unsafe extern "C" fn boot_higher_half(dtb_ptr: *const u8) -> ! {
     unsafe {
         super::serial::init();
-        let bss_start = &__bss_start as *const u8 as usize;
-        let bss_end = &__bss_end as *const u8 as usize;
+        let bss_start = &raw const __bss_start as usize;
+        let bss_end = &raw const __bss_end as usize;
 
         println!();
 
@@ -67,13 +67,16 @@ pub unsafe extern "C" fn boot_higher_half(dtb_ptr: *const u8) -> ! {
         memzero(bss_start, bss_end);
 
         println!("parsing FDT");
-        let fdt = Fdt::from_ptr(dtb_ptr).unwrap();
+        let Ok(fdt) = Fdt::from_ptr(dtb_ptr) else {
+            println!("FDT parsing failed");
+            Arch::hcf();
+        };
         let mut mem_map = MemMapEntries::new();
 
-        let kernel_phys_start = &__kernel_phys_start as *const _ as usize;
-        let kernel_phys_end = &__kernel_phys_end as *const _ as usize;
-        let boot_phys_start = &__boot_start as *const _ as usize;
-        let boot_phys_end = &__boot_end as *const _ as usize;
+        let kernel_phys_start = &raw const __kernel_phys_start as usize;
+        let kernel_phys_end = &raw const __kernel_phys_end as usize;
+        let boot_phys_start = &raw const __boot_start as usize;
+        let boot_phys_end = &raw const __boot_end as usize;
 
         println!("enumerating memory regions");
         for region in fdt.memory().regions() {

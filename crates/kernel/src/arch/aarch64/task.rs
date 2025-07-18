@@ -54,6 +54,10 @@ impl ArchContext {
 }
 
 /// Switches the current task's context to the next task's context.
+///
+/// # Panics
+///
+/// This function will panic if there is no current CPU-local block.
 pub unsafe fn switch_to(prev: &mut Context, next: &mut Context) {
     CpuLocalBlock::current()
         .unwrap()

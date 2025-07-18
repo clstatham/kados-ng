@@ -6,7 +6,11 @@
     clippy::uninlined_format_args,
     clippy::identity_op,
     clippy::unnecessary_cast,
-    clippy::eq_op
+    clippy::eq_op,
+    clippy::missing_errors_doc,
+    clippy::cast_possible_truncation, // todo: fix instances and remove this
+    clippy::cast_possible_wrap, // todo: fix instances and remove this
+    clippy::cast_sign_loss, // todo: fix instances and remove this
 )]
 #![feature(if_let_guard, iter_next_chunk, array_chunks)]
 
@@ -60,13 +64,14 @@ pub const KERNEL_OFFSET: usize = 0xffff_ffff_8000_0000;
 macro_rules! elf_offsets {
     ($($name:ident),* $(,)?) => {
         $(
-            #[inline(always)]
+            #[inline]
             #[doc = concat!("Returns the address of the kernel ELF symbol `", stringify!($name), "`.")]
+            #[must_use]
             pub fn $name() -> usize {
                 unsafe extern "C" {
                     unsafe static $name: u8;
                 }
-                unsafe { &$name as *const u8 as usize }
+                &raw const $name as usize
             }
         )*
     };
@@ -163,7 +168,7 @@ pub(crate) extern "C" fn kernel_main() -> ! {
 
     #[rustfmt::skip]
     println!(
-        r#"
+        r"
 welcome to...
  ___  __    ________  ________  ________  ________      
 |\  \|\  \ |\   __  \|\   ___ \|\   __  \|\   ____\     
@@ -174,7 +179,7 @@ welcome to...
     \|__| \|__|\|__|\|__|\|_______|\|_______|\_________\
                                             \|_________|
 
-"#
+"
     );
 
     unsafe { Arch::enable_interrupts() }

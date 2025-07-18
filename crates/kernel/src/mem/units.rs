@@ -1,6 +1,6 @@
 use core::fmt::{self, Debug, Display};
 
-use derive_more::*;
+use derive_more::{Add, Binary, Deref, Div, LowerHex, Mul, Rem, Sub, UpperHex, core};
 
 use crate::{
     HHDM_PHYSICAL_OFFSET,
@@ -11,12 +11,14 @@ use super::{MemError, paging::table::PageTableLevel};
 
 /// Canonicalizes a physical address by masking the upper bits.
 #[inline]
+#[must_use]
 pub const fn canonicalize_physaddr(addr: usize) -> usize {
     addr & 0x000F_FFFF_FFFF_FFFF
 }
 
 /// Canonicalizes a virtual address by shifting it to ensure it fits within the canonical range.
 #[inline]
+#[must_use]
 pub const fn canonicalize_virtaddr(addr: usize) -> usize {
     ((addr << 16) as i64 >> 16) as usize
 }
@@ -43,6 +45,7 @@ impl PhysAddr {
     pub const NULL: Self = unsafe { Self::new_unchecked(0) };
 
     /// Creates a new physical address that is guaranteed to be canonical (canonicalized with [`canonicalize_physaddr`] if it isn't).
+    #[must_use]
     pub const fn new_canonical(addr: usize) -> Self {
         unsafe { Self::new_unchecked(canonicalize_physaddr(addr)) }
     }
@@ -57,56 +60,67 @@ impl PhysAddr {
     }
 
     /// Creates a new physical address without checking if it is canonical.
+    #[must_use]
     pub const unsafe fn new_unchecked(addr: usize) -> Self {
         Self(addr)
     }
 
     /// Returns the raw address value as an unsigned integer.
+    #[must_use]
     pub const fn value(self) -> usize {
         self.0
     }
 
     /// Returns `true` if the address is null (0).
+    #[must_use]
     pub const fn is_null(self) -> bool {
         self.value() == Self::NULL.value()
     }
 
     /// Returns `true` if the address is canonical.
+    #[must_use]
     pub const fn is_canonical(self) -> bool {
         self.0 == canonicalize_physaddr(self.0)
     }
 
     /// Returns `true` if the address is aligned to the specified alignment.
+    #[must_use]
     pub const fn is_aligned(self, align: usize) -> bool {
         self.value().is_multiple_of(align) || self.value() & (align - 1) == 0
     }
 
     /// Returns the sum of the address and an offset, ensuring the result is canonical.
+    #[must_use]
     pub const fn add_bytes(self, offset: usize) -> Self {
         Self::new_canonical(self.value() + offset)
     }
 
     /// Returns the address as a [`VirtAddr`] in the HHDM (High Half Direct Mapped) space.
+    #[must_use]
     pub const fn as_hhdm_virt(self) -> VirtAddr {
         VirtAddr::new_canonical(self.value() + HHDM_PHYSICAL_OFFSET)
     }
 
     /// Returns the address as a [`VirtAddr`] in the identity-mapped virtual address space.
+    #[must_use]
     pub const fn as_identity_virt(self) -> VirtAddr {
         VirtAddr::new_canonical(self.value())
     }
 
     /// Returns the index of the frame corresponding to this physical address.
+    #[must_use]
     pub const fn frame_index(self) -> FrameCount {
         FrameCount::from_bytes(self.value())
     }
 
     /// Returns the address aligned down to the nearest multiple of the specified alignment.
+    #[must_use]
     pub const fn align_down(self, align: usize) -> Self {
         PhysAddr::new_canonical(self.value() / align * align)
     }
 
     /// Returns the address aligned up to the nearest multiple of the specified alignment.
+    #[must_use]
     pub const fn align_up(self, align: usize) -> Self {
         PhysAddr::new_canonical(self.value().div_ceil(align) * align)
     }
@@ -156,13 +170,14 @@ impl VirtAddr {
     pub const NULL: Self = unsafe { Self::new_unchecked(0) };
 
     /// Creates a new virtual address that is guaranteed to be canonical (canonicalized with [`canonicalize_virtaddr`] if it isn't).
-    #[inline(always)]
+    #[inline]
+    #[must_use]
     pub const fn new_canonical(addr: usize) -> Self {
         unsafe { Self::new_unchecked(canonicalize_virtaddr(addr)) }
     }
 
     /// Creates a new virtual address, checking if it is canonical.
-    #[inline(always)]
+    #[inline]
     pub const fn new(addr: usize) -> Result<Self, MemError> {
         if canonicalize_virtaddr(addr) == addr {
             Ok(unsafe { Self::new_unchecked(addr) })
@@ -172,55 +187,64 @@ impl VirtAddr {
     }
 
     /// Creates a new virtual address without checking if it is canonical.
-    #[inline(always)]
+    #[inline]
+    #[must_use]
     pub const unsafe fn new_unchecked(addr: usize) -> Self {
         Self(addr)
     }
 
     /// Creates a new virtual address from a reference, ensuring it is canonical.
-    #[inline(always)]
+    #[inline]
+    #[must_use]
     pub fn from_ref<T: 'static>(val: &T) -> Self {
-        Self::new_canonical(val as *const _ as usize)
+        Self::new_canonical(&raw const *val as usize)
     }
 
     /// Creates a new virtual address from a mutable reference, ensuring it is canonical.
-    #[inline(always)]
+    #[inline]
+    #[must_use]
     pub fn from_mut<T: 'static>(val: &mut T) -> Self {
-        Self::new_canonical(val as *mut _ as usize)
+        Self::new_canonical(&raw const *val as usize)
     }
 
     /// Returns the raw address value as an unsigned integer.
-    #[inline(always)]
+    #[inline]
+    #[must_use]
     pub const fn value(self) -> usize {
         self.0
     }
 
     /// Returns `true` if the address is null (0).
-    #[inline(always)]
+    #[inline]
+    #[must_use]
     pub const fn is_null(self) -> bool {
         self.value() == Self::NULL.value()
     }
 
     /// Returns `true` if the address is canonical.
-    #[inline(always)]
+    #[inline]
+    #[must_use]
     pub const fn is_canonical(self) -> bool {
         self.0 == canonicalize_virtaddr(self.0)
     }
 
     /// Casts the address to a raw pointer of type `*const T`.
-    #[inline(always)]
+    #[inline]
+    #[must_use]
     pub const fn as_raw_ptr<T: 'static>(self) -> *const T {
         self.value() as *const T
     }
 
     /// Casts the address to a raw mutable pointer of type `*mut T`.
-    #[inline(always)]
+    #[inline]
+    #[must_use]
     pub const fn as_raw_ptr_mut<T: 'static>(self) -> *mut T {
         self.value() as *mut T
     }
 
     /// Returns `true` if the address is aligned to the specified alignment.
-    #[inline(always)]
+    #[inline]
+    #[must_use]
     pub const fn is_aligned(self, align: usize) -> bool {
         self.value().is_multiple_of(align) || self.value() & (align - 1) == 0
     }
@@ -229,7 +253,7 @@ impl VirtAddr {
     /// Also checks if the address is null or non-canonical.
     ///
     /// Essentially, this method ensures that the address is suitable for accessing data of type `T`.
-    #[inline(always)]
+    #[inline]
     pub const fn align_ok<T: Sized>(self) -> Result<(), MemError> {
         if self.is_null() {
             return Err(MemError::NullVirtAddr);
@@ -244,39 +268,42 @@ impl VirtAddr {
     }
 
     /// Returns the address as a [`PhysAddr`] in the HHDM (High Half Direct Mapped) space.
-    #[inline(always)]
+    #[inline]
+    #[must_use]
     pub fn as_hhdm_phys(self) -> PhysAddr {
         PhysAddr::new_canonical(self.value() - HHDM_PHYSICAL_OFFSET)
     }
 
     /// Returns the sum of the address and an offset, ensuring the result is canonical.
-    #[inline(always)]
+    #[inline]
+    #[must_use]
     pub const fn add_bytes(self, offset: usize) -> Self {
         Self::new_canonical(self.value() + offset)
     }
 
     /// Returns the signed sum of the address and an offset, ensuring the result is canonical.
-    #[inline(always)]
+    #[inline]
+    #[must_use]
     pub const fn offset_bytes(self, offset: isize) -> Self {
         Self::new_canonical((self.value() as isize + offset) as usize)
     }
 
     /// Reads a value of type `T` from the address, ensuring it is aligned, canonical, and non-null.
-    #[inline(always)]
+    #[inline]
     pub unsafe fn read<T: Copy + 'static>(self) -> Result<T, MemError> {
         self.align_ok::<T>()?;
         Ok(unsafe { self.as_raw_ptr::<T>().read() })
     }
 
     /// Reads a volatile value of type `T` from the address, ensuring it is aligned, canonical, and non-null.
-    #[inline(always)]
+    #[inline]
     pub unsafe fn read_volatile<T: Copy + 'static>(self) -> Result<T, MemError> {
         self.align_ok::<T>()?;
         Ok(unsafe { self.as_raw_ptr::<T>().read_volatile() })
     }
 
     /// Reads a slice of bytes from the address, ensuring it is aligned, canonical, and non-null.
-    #[inline(always)]
+    #[inline]
     pub unsafe fn read_bytes(self, buf: &mut [u8]) -> Result<usize, MemError> {
         self.align_ok::<u8>()?; // check for null and canonicalness
         if buf.is_empty() {
@@ -290,7 +317,7 @@ impl VirtAddr {
     }
 
     /// Writes a value of type `T` to the address, ensuring it is aligned, canonical, and non-null.
-    #[inline(always)]
+    #[inline]
     pub unsafe fn write<T: 'static>(self, val: T) -> Result<(), MemError> {
         self.align_ok::<T>()?;
         unsafe {
@@ -300,7 +327,7 @@ impl VirtAddr {
     }
 
     /// Writes a volatile value of type `T` to the address, ensuring it is aligned, canonical, and non-null.
-    #[inline(always)]
+    #[inline]
     pub unsafe fn write_volatile<T: 'static>(self, val: T) -> Result<(), MemError> {
         self.align_ok::<T>()?;
         unsafe {
@@ -310,7 +337,7 @@ impl VirtAddr {
     }
 
     /// Writes a slice of bytes to the address, ensuring it is aligned, canonical, and non-null.
-    #[inline(always)]
+    #[inline]
     pub unsafe fn write_bytes(self, buf: &[u8]) -> Result<usize, MemError> {
         self.align_ok::<u8>()?; // check for null and canonicalness
         self.add_bytes(buf.len()).align_ok::<u8>()?; // check for out-of-bounds access
@@ -321,7 +348,7 @@ impl VirtAddr {
     }
 
     /// Fills a length of bytes at the address with a specified value, ensuring it is aligned, canonical, and non-null.
-    #[inline(always)]
+    #[inline]
     pub unsafe fn fill(self, val: u8, len: usize) -> Result<usize, MemError> {
         self.align_ok::<u8>()?;
         self.add_bytes(len).align_ok::<u8>()?; // check for out-of-bounds access
@@ -332,33 +359,36 @@ impl VirtAddr {
     }
 
     /// Returns a reference to the value at the address, ensuring it is aligned, canonical, and non-null.
-    #[inline(always)]
+    #[inline]
     pub unsafe fn deref<'a, T: 'static>(self) -> Result<&'a T, MemError> {
         self.align_ok::<T>()?;
         Ok(unsafe { &*self.as_raw_ptr() })
     }
 
     /// Returns a mutable reference to the value at the address, ensuring it is aligned, canonical, and non-null.
-    #[inline(always)]
+    #[inline]
     pub unsafe fn deref_mut<'a, T: 'static>(self) -> Result<&'a mut T, MemError> {
         self.align_ok::<T>()?;
         Ok(unsafe { &mut *self.as_raw_ptr_mut() })
     }
 
     // Returns the address aligned down to the nearest multiple of the specified alignment.
-    #[inline(always)]
+    #[inline]
+    #[must_use]
     pub const fn align_down(self, align: usize) -> Self {
         VirtAddr::new_canonical(self.value() / align * align)
     }
 
     /// Returns the address aligned up to the nearest multiple of the specified alignment.
-    #[inline(always)]
+    #[inline]
+    #[must_use]
     pub const fn align_up(self, align: usize) -> Self {
         VirtAddr::new_canonical(self.value().div_ceil(align) * align)
     }
 
     /// Returns the index of the page table entry corresponding to this virtual address at the specified page table level.
-    #[inline(always)]
+    #[inline]
+    #[must_use]
     pub const fn page_table_index(self, level: PageTableLevel) -> usize {
         (self.value() >> level.shift()) & Arch::PAGE_ENTRY_MASK
     }
@@ -382,26 +412,31 @@ impl FrameCount {
     pub const ONE: Self = Self(1);
 
     /// Creates a new frame count from the number of frames.
+    #[must_use]
     pub const fn new(count: usize) -> Self {
         Self(count)
     }
 
     /// Creates a new frame count from the number of bytes, ensuring it is rounded up to the nearest frame size.
+    #[must_use]
     pub const fn from_bytes(bytes: usize) -> Self {
         Self(bytes.div_ceil(Arch::PAGE_SIZE))
     }
 
     /// Returns the number of frames in this frame count.
+    #[must_use]
     pub const fn frame_count(self) -> usize {
         self.0
     }
 
     /// Returns the index of the frame corresponding to this frame count, starting from 0.
+    #[must_use]
     pub const fn frame_index(self) -> usize {
         self.0
     }
 
     /// Returns the number of bytes represented by this frame count.
+    #[must_use]
     pub const fn to_bytes(self) -> usize {
         self.0 * Arch::PAGE_SIZE
     }

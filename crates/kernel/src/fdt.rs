@@ -52,13 +52,14 @@ pub fn dump(fdt: &Fdt) {
 int_wrapper!(pub Phandle: u32);
 
 /// Returns the MMIO address for a given memory region in the device tree.
+#[must_use]
 pub fn get_mmio_addr(fdt: &Fdt, region: &MemoryRegion) -> Option<PhysAddr> {
     let mut mapped_addr = region.starting_address as usize;
     let size = region.size.unwrap_or(0).saturating_sub(1);
     let last_addr = mapped_addr.saturating_add(size);
 
     if let Some(parent) = fdt.find_node("/soc") {
-        let mut ranges = parent.ranges().map(|f| f.peekable())?;
+        let mut ranges = parent.ranges().map(Iterator::peekable)?;
         if ranges.peek().is_some() {
             let parent_range = ranges.find(|x| {
                 x.child_bus_address <= mapped_addr && last_addr - x.child_bus_address <= x.size

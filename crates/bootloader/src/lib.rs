@@ -239,7 +239,7 @@ pub unsafe extern "C" fn boot_el2(dtb_ptr: *const u8) -> ! {
     }
 }
 
-#[inline(always)]
+#[inline]
 pub fn alloc_table(off: &mut usize) -> &'static mut Table {
     let table = unsafe { &mut *(*off as *mut Table) };
     // memzero(table as *mut Table as *mut u8, size_of::<Table>());
@@ -247,7 +247,7 @@ pub fn alloc_table(off: &mut usize) -> &'static mut Table {
     table
 }
 
-#[inline(always)]
+#[inline]
 pub fn memzero(ptr: *mut u8, size: usize) {
     unsafe {
         asm!(

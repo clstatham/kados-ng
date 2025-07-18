@@ -46,7 +46,9 @@ impl Gic {
     /// Parses the GIC addresses from the device tree.
     pub fn parse(fdt: &Fdt) -> Result<GicAddrs, Errno> {
         if let Some(node) = fdt.find_compatible(&["arm,gic-400"]) {
-            let region_iter = node.reg().unwrap();
+            let Some(region_iter) = node.reg() else {
+                return Err(Errno::EINVAL);
+            };
             let mut addrs = GicAddrs::default();
             let mut idx = 0;
 
@@ -57,14 +59,16 @@ impl Gic {
                     }
                     None => break,
                     _ => {}
-                };
+                }
 
-                let addr = get_mmio_addr(fdt, &region).unwrap();
+                let Some(addr) = get_mmio_addr(fdt, &region) else {
+                    return Err(Errno::EINVAL);
+                };
                 match idx {
                     0 => addrs.dist_phys = addr,
                     2 => addrs.cpu_phys = addr,
                     _ => break,
-                };
+                }
                 idx += 2;
             }
 
@@ -205,6 +209,7 @@ impl GicDist {
     }
 
     /// Checks if the given IRQ is pending in the GIC distributor.
+    #[must_use]
     pub unsafe fn is_irq_pending(&self, irq: Irq) -> bool {
         let off = GICD_ISPENDR + ((irq.as_usize() / 32) * 4);
         let bit = 1 << (irq.as_usize() % 32);

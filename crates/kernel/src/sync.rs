@@ -37,6 +37,7 @@ impl SavedInterruptStatus {
     }
 
     /// Returns whether interrupts were enabled when this struct was created.
+    #[must_use]
     pub fn enabled(&self) -> bool {
         self.enabled
     }

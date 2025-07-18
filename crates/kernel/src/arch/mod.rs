@@ -140,11 +140,11 @@ pub trait Architecture {
 
     /// The mask used to extract the address from a page table entry.
     ///
-    /// This is typically 0xFFFF_FFFF_FFFF_F000 for 64-bit architectures.
+    /// This is typically `0xFFFF_FFFF_FFFF_F000` for 64-bit architectures.
     const PAGE_ENTRY_ADDR_MASK: usize = Self::PAGE_ENTRY_ADDR_SIZE - 1;
 
     /// The mask used to extract the flags from a page table entry.
-    /// This is typically 0x0000_0000_0000_0FFF for 64-bit architectures.
+    /// This is typically `0x0000_0000_0000_0FFF` for 64-bit architectures.
     const PAGE_ENTRY_FLAGS_MASK: usize =
         !(Self::PAGE_ENTRY_ADDR_MASK << Self::PAGE_ENTRY_ADDR_SHIFT);
 
@@ -246,7 +246,7 @@ pub trait Architecture {
     fn breakpoint();
 
     /// Halts the CPU and enters an infinite loop.
-    #[inline(always)]
+    #[inline]
     fn hcf() -> ! {
         loop {
             Self::halt();
@@ -257,7 +257,7 @@ pub trait Architecture {
     /// Delays execution for at least the specified number of cycles.
     ///
     /// This just calls `nop()` in a loop, so the delay is not precise.
-    #[inline(always)]
+    #[inline]
     fn delay_cycles(cycles: usize) {
         for _ in 0..cycles {
             Self::nop();
