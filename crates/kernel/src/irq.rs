@@ -1,3 +1,5 @@
+use core::fmt::Display;
+
 use alloc::boxed::Box;
 use fdt::{Fdt, node::FdtNode, standard_nodes::Compatible};
 use spin::Once;
@@ -63,7 +65,34 @@ pub fn enable_irq(irq: Irq) {
     irq_chip().enable_irq(irq);
 }
 
-int_wrapper!(pub Irq: u32);
+#[derive(Default, Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Irq(u32);
+
+impl Irq {
+    /// Creates a new IRQ from the given number.
+    #[must_use]
+    pub const fn from(value: u32) -> Self {
+        Self(value)
+    }
+
+    /// Returns the IRQ number as a `u32`.
+    #[must_use]
+    pub const fn value(self) -> u32 {
+        self.0
+    }
+
+    /// Returns the IRQ number as a `usize`.
+    #[must_use]
+    pub const fn as_usize(self) -> usize {
+        self.0 as usize
+    }
+}
+
+impl Display for Irq {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
 
 /// Represents the IRQ cell structure used in device trees.
 #[derive(Debug, Clone, Copy)]
@@ -227,7 +256,7 @@ impl IrqChipDescriptor {
                     continue;
                 };
 
-                this.phandle = Phandle::from(phandle);
+                this.phandle = Phandle::new(phandle);
                 let intr_cells = node.interrupt_cells().unwrap_or(1);
 
                 log::debug!(
@@ -313,15 +342,28 @@ fn interrupt_parent<'a>(fdt: &'a Fdt<'a>, node: &'a FdtNode<'a, 'a>) -> Option<F
 pub fn get_interrupt(fdt: &Fdt, node: &FdtNode, idx: usize) -> Option<IrqCell> {
     let interrupts = node.property("interrupts")?;
     let parent_intr_cells = interrupt_parent(fdt, node)?.interrupt_cells()?;
-    let mut intr = interrupts
-        .value
-        .array_chunks::<4>()
-        .map(|f| u32::from_be_bytes(*f))
-        .skip(parent_intr_cells * idx);
+    let bytes = interrupts.value;
+    let start_offset = parent_intr_cells * idx * 4;
+
+    if start_offset + parent_intr_cells * 4 > bytes.len() {
+        return None;
+    }
+
+    let mut values = [0u32; 3];
+    for (i, value) in values.iter_mut().enumerate().take(parent_intr_cells) {
+        let offset = start_offset + i * 4;
+        if offset + 4 <= bytes.len() {
+            let chunk = &bytes[offset..offset + 4];
+            *value = u32::from_be_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]);
+        } else {
+            return None;
+        }
+    }
+
     match parent_intr_cells {
-        1 if let Some(a) = intr.next() => Some(IrqCell::L1(a)),
-        2 if let Ok([a, b]) = intr.next_chunk() => Some(IrqCell::L2(a, b)),
-        3 if let Ok([a, b, c]) = intr.next_chunk() => Some(IrqCell::L3(a, b, c)),
+        1 => Some(IrqCell::L1(values[0])),
+        2 => Some(IrqCell::L2(values[0], values[1])),
+        3 => Some(IrqCell::L3(values[0], values[1], values[2])),
         _ => None,
     }
 }

@@ -4,7 +4,7 @@ use alloc::vec::Vec;
 use fdt::standard_nodes::MemoryRegion;
 pub use fdt::*;
 
-use crate::{int_wrapper, mem::units::PhysAddr};
+use crate::mem::units::PhysAddr;
 
 /// Initializes the FDT subsystem.
 pub fn init(_fdt: &Fdt) {
@@ -49,7 +49,22 @@ pub fn dump(fdt: &Fdt) {
     log::debug!("END FDT DUMP");
 }
 
-int_wrapper!(pub Phandle: u32);
+#[derive(Default, Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Phandle(u32);
+
+impl Phandle {
+    /// Creates a new `Phandle` from a raw value.
+    #[must_use]
+    pub const fn new(value: u32) -> Self {
+        Self(value)
+    }
+
+    /// Returns the raw value of the `Phandle`.
+    #[must_use]
+    pub const fn value(self) -> u32 {
+        self.0
+    }
+}
 
 /// Returns the MMIO address for a given memory region in the device tree.
 #[must_use]

@@ -22,13 +22,13 @@ impl AddrSpace {
             .ok_or(Errno::ESRCH)
     }
 
-    pub fn new() -> Result<Self, Errno> {
+    pub fn new_user() -> Result<Self, Errno> {
         Ok(Self {
             table: PageTable::create(TableKind::User),
         })
     }
 
-    pub fn kernel() -> Result<Self, Errno> {
+    pub fn current_kernel() -> Result<Self, Errno> {
         Ok(Self {
             table: PageTable::current(TableKind::Kernel),
         })
@@ -40,13 +40,13 @@ pub struct AddrSpaceLock {
 }
 
 impl AddrSpaceLock {
-    pub fn new() -> Result<Arc<Self>, Errno> {
-        let lock = RwLock::new(AddrSpace::new()?);
+    pub fn new_user() -> Result<Arc<Self>, Errno> {
+        let lock = RwLock::new(AddrSpace::new_user()?);
         Ok(Arc::new(Self { lock }))
     }
 
-    pub fn kernel() -> Result<Arc<Self>, Errno> {
-        let lock = RwLock::new(AddrSpace::kernel()?);
+    pub fn current_kernel() -> Result<Arc<Self>, Errno> {
+        let lock = RwLock::new(AddrSpace::current_kernel()?);
         Ok(Arc::new(Self { lock }))
     }
 

@@ -21,9 +21,9 @@ pub fn spawn(user: bool, entry_func: extern "C" fn()) -> Result<Arc<RwSpinlock<C
     {
         let mut cx = cx_lock.write();
         let addr_space = if user {
-            AddrSpaceLock::new()?
+            AddrSpaceLock::new_user()?
         } else {
-            AddrSpaceLock::kernel()?
+            AddrSpaceLock::current_kernel()?
         };
         let _ = cx.addr_space.replace(addr_space);
         cx.arch.setup_initial_call(&stack, entry_func, user);

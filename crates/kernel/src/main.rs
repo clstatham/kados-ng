@@ -12,7 +12,7 @@
     clippy::cast_possible_wrap, // todo: fix instances and remove this
     clippy::cast_sign_loss, // todo: fix instances and remove this
 )]
-#![feature(if_let_guard, iter_next_chunk, array_chunks)]
+#![feature(if_let_guard, iter_next_chunk)]
 
 use arch::{Arch, Architecture};
 use fdt::Fdt;

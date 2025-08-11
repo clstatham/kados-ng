@@ -5,6 +5,9 @@ use xshell::{Shell, cmd};
 
 #[derive(Subcommand, Clone, Debug, PartialEq, Eq)]
 pub enum Mode {
+    /// Checks that the correct dependencies are installed
+    #[clap(alias = "check-deps")]
+    CheckDependencies,
     /// Build the kernel
     Build {
         #[clap(short, long, default_value_t = false)]
@@ -391,13 +394,47 @@ impl Context {
     }
 }
 
+#[allow(clippy::print_stdout)]
+pub fn check_dependencies() -> anyhow::Result<()> {
+    log::info!("Checking dependencies...");
+
+    let sh = Shell::new()?;
+
+    if let Err(e) = cmd!(sh, "cargo --version").run() {
+        log::error!("Cargo is not installed or not found in PATH.");
+        log::error!("Please install Rust and Cargo from https://www.rust-lang.org/tools/install");
+        return Err(e.into());
+    }
+    if let Err(e) = cmd!(sh, "llvm-objcopy --version").run() {
+        log::error!("`llvm-objcopy` is not installed or not found in PATH.");
+        log::error!(
+            "Please install `llvm-tools` from your package manager or via `rustup component add llvm-tools-preview`"
+        );
+        return Err(e.into());
+    }
+    if let Err(e) = cmd!(sh, "qemu-system-aarch64 --version").run() {
+        log::error!("`qemu-system-aarch64` is not installed or not found in PATH.");
+        log::error!(
+            "Please install QEMU from your package manager or from https://www.qemu.org/download/"
+        );
+        return Err(e.into());
+    }
+
+    log::info!("All dependencies are installed!");
+
+    Ok(())
+}
+
 fn main() -> anyhow::Result<()> {
     env_logger::builder()
         .filter_level(log::LevelFilter::Info)
         .init();
     let args = Args::parse();
 
+    check_dependencies()?;
+
     match args.mode {
+        Mode::CheckDependencies => {} // handled above
         Mode::Build { release } => {
             let cx = Context::new(release)?;
             cx.full_build_kernel()?;

@@ -268,7 +268,7 @@ impl Mailbox {
         };
 
         Ok(Self {
-            phandle: Phandle::from(phandle),
+            phandle: Phandle::new(phandle),
             base: mmio_addr.as_hhdm_virt(),
         })
     }
@@ -415,7 +415,7 @@ pub fn init(fdt: &Fdt) {
     flush.flush();
 
     crate::framebuffer::FRAMEBUFFER_INFO.call_once(|| FramebufferInfo {
-        base: page,
+        start_addr: page,
         size_bytes: buffer.size as usize,
         width: phys_size.width as usize,
         height: phys_size.height as usize,

@@ -95,8 +95,9 @@ pub unsafe extern "C" fn _start(dtb_ptr: *const u8) -> ! {
     
     3:
         dsb sy
-        1: wfe
-        b 1b
+    4:
+        wfe
+        b 4b
         ",
     )
 }
@@ -242,30 +243,8 @@ pub unsafe extern "C" fn boot_el2(dtb_ptr: *const u8) -> ! {
 #[inline]
 pub fn alloc_table(off: &mut usize) -> &'static mut Table {
     let table = unsafe { &mut *(*off as *mut Table) };
-    // memzero(table as *mut Table as *mut u8, size_of::<Table>());
     *off += size_of::<Table>();
     table
-}
-
-#[inline]
-pub fn memzero(ptr: *mut u8, size: usize) {
-    unsafe {
-        asm!(
-            "mov x0, {start}",
-            "mov x1, {end}",
-            "mov x2, xzr",
-            "1: cmp x0, x1",
-            "b.hs 2f",
-            "str x2, [x0], #8",
-            "b 1b",
-            "2:",
-            start = in(reg) ptr as u64,
-            end = in(reg) (ptr as u64 + size as u64),
-            out("x0") _,
-            out("x1") _,
-            out("x2") _,
-        )
-    }
 }
 
 pub const fn l0_index(addr: usize) -> usize {

@@ -30,3 +30,4 @@ aarch64-cpu = "10.0.0"
 [lints.clippy]
 pedantic = "warn"
 style = "warn"
+perf = "warn"

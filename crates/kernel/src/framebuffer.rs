@@ -419,7 +419,7 @@ pub fn write_fmt(args: core::fmt::Arguments) {
 /// Information about the framebuffer.
 #[derive(Debug, Clone, Copy)]
 pub struct FramebufferInfo {
-    pub base: VirtAddr,
+    pub start_addr: VirtAddr,
     pub size_bytes: usize,
     pub width: usize,
     pub height: usize,
@@ -432,7 +432,7 @@ pub static FRAMEBUFFER_INFO: Once<FramebufferInfo> = Once::new();
 /// Initializes the global [`FRAMEBUFFER`] from the predefined [`FRAMEBUFFER_INFO`].
 pub fn init() {
     let Some(FramebufferInfo {
-        base,
+        start_addr,
         size_bytes,
         width,
         height,
@@ -443,7 +443,7 @@ pub fn init() {
     };
 
     let mut framebuf = FrameBuffer {
-        start_addr: base,
+        start_addr,
         size_bytes,
         width,
         height,
