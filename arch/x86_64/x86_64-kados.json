@@ -16,7 +16,7 @@
     "plt-by-default": false,
     "position-independent-executables": false,
     "rustc-abi": "x86-softfloat",
-    "target-pointer-width": "64",
+    "target-pointer-width": 64,
     "relocation-model": "static",
     "frame-pointer": "always"
 }
