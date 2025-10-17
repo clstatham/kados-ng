@@ -36,8 +36,7 @@ There are many more utilities available via the build tool, run `cargo builder -
 > [!WARNING]
 > Replace `/dev/sdX` with the actual device path of your SD card. Be very careful to choose the
 > correct device, as this command will overwrite the contents of the specified device.
-
-> [!NOTE]
+>
 > This command will use `sudo` to request root access for mounting the device.
 
 ## Chainloading over USB UART serial port
