@@ -1,9 +1,8 @@
-use core::fmt::{self, Debug};
+#![allow(unused)]
 
-use crate::{
-    arch::{Arch, Architecture},
-    println,
-};
+use core::fmt::Debug;
+
+use crate::println;
 
 /// Busy-waits the current core until the provided function returns `false`.
 #[inline]
@@ -20,17 +19,17 @@ pub fn spin_while(f: impl Fn() -> bool) {
 pub trait DebugPanic {
     /// Checks if the value is `Ok` or `Some`, and returns it.
     ///
-    /// If the value is `Err` or `None`, it panics in debug mode.
+    /// In debug mode, it panics if the value is `Err` or `None`.
     /// In release mode, it returns the `Err` or `None` value.
     #[must_use]
     fn debug_unwrap(self) -> Self;
 
     /// Checks if the value is `Ok` or `Some`, and returns it.
     ///
-    /// If the value is `Err` or `None`, it panics in debug mode with a custom message.
+    /// In debug mode, it panics with a custom message if the value is `Err` or `None`.
     /// In release mode, it returns the `Err` or `None` value.
     #[must_use]
-    fn debug_expect(self, msg: impl fmt::Display) -> Self;
+    fn debug_expect(self, msg: &str) -> Self;
 }
 
 pub trait DebugCheckedPanic: DebugPanic {
@@ -44,36 +43,28 @@ pub trait DebugCheckedPanic: DebugPanic {
     /// Checks if the value is `Ok` or `Some`, and returns it.
     ///
     /// If the value is `Err` or `None`, it panics in debug mode with a custom message, or ***invokes undefined behavior*** in release mode.
-    fn debug_checked_expect(self, msg: impl fmt::Display) -> Self::Output;
+    fn debug_checked_expect(self, msg: &str) -> Self::Output;
 }
 
 impl<T, E: Debug> DebugPanic for Result<T, E> {
     #[inline]
     fn debug_unwrap(self) -> Self {
-        match self {
-            Ok(val) => Ok(val),
-            Err(err) => {
-                if cfg!(debug_assertions) {
-                    panic!("DebugPanic: {:?}", err);
-                } else {
-                    Err(err)
-                }
-            }
+        #[cfg(debug_assertions)]
+        {
+            Ok(self.unwrap())
         }
+        #[cfg(not(debug_assertions))]
+        self
     }
 
     #[inline]
-    fn debug_expect(self, msg: impl fmt::Display) -> Self {
-        match self {
-            Ok(val) => Ok(val),
-            Err(err) => {
-                if cfg!(debug_assertions) {
-                    panic!("DebugPanic: {}: {:?}", msg, err);
-                } else {
-                    Err(err)
-                }
-            }
+    fn debug_expect(self, msg: &str) -> Self {
+        #[cfg(debug_assertions)]
+        {
+            Ok(self.expect(msg))
         }
+        #[cfg(not(debug_assertions))]
+        self
     }
 }
 
@@ -82,30 +73,32 @@ impl<T, E: Debug> DebugCheckedPanic for Result<T, E> {
 
     #[inline]
     fn debug_checked_unwrap(self) -> Self::Output {
+        #[cfg(debug_assertions)]
+        {
+            self.unwrap()
+        }
+        #[cfg(not(debug_assertions))]
         match self {
-            Ok(val) => val,
-            Err(err) => {
-                if cfg!(debug_assertions) {
-                    panic!("DebugCheckedPanic: {:?}", err);
-                } else {
-                    println!("DebugCheckedPanic: {:?}", err);
-                    Arch::hcf();
-                }
+            Ok(v) => v,
+            Err(e) => {
+                println!("debug_checked_unwrap failed: {e:?}");
+                unsafe { core::hint::unreachable_unchecked() }
             }
         }
     }
 
     #[inline]
-    fn debug_checked_expect(self, msg: impl fmt::Display) -> Self::Output {
+    fn debug_checked_expect(self, msg: &str) -> Self::Output {
+        #[cfg(debug_assertions)]
+        {
+            self.expect(msg)
+        }
+        #[cfg(not(debug_assertions))]
         match self {
-            Ok(val) => val,
-            Err(err) => {
-                if cfg!(debug_assertions) {
-                    panic!("DebugCheckedPanic: {}: {:?}", msg, err);
-                } else {
-                    println!("DebugCheckedPanic: {}: {:?}", msg, err);
-                    Arch::hcf();
-                }
+            Ok(v) => v,
+            Err(e) => {
+                println!("debug_checked_expect failed: {msg}: {e:?}");
+                unsafe { core::hint::unreachable_unchecked() }
             }
         }
     }
@@ -114,30 +107,22 @@ impl<T, E: Debug> DebugCheckedPanic for Result<T, E> {
 impl<T> DebugPanic for Option<T> {
     #[inline]
     fn debug_unwrap(self) -> Self {
-        match self {
-            Some(val) => Some(val),
-            None => {
-                if cfg!(debug_assertions) {
-                    panic!("DebugPanic: None");
-                } else {
-                    None
-                }
-            }
+        #[cfg(debug_assertions)]
+        {
+            Some(self.unwrap())
         }
+        #[cfg(not(debug_assertions))]
+        self
     }
 
     #[inline]
-    fn debug_expect(self, msg: impl fmt::Display) -> Self {
-        match self {
-            Some(val) => Some(val),
-            None => {
-                if cfg!(debug_assertions) {
-                    panic!("DebugPanic: {}: None", msg);
-                } else {
-                    None
-                }
-            }
+    fn debug_expect(self, msg: &str) -> Self {
+        #[cfg(debug_assertions)]
+        {
+            Some(self.expect(msg))
         }
+        #[cfg(not(debug_assertions))]
+        self
     }
 }
 
@@ -146,30 +131,32 @@ impl<T> DebugCheckedPanic for Option<T> {
 
     #[inline]
     fn debug_checked_unwrap(self) -> Self::Output {
+        #[cfg(debug_assertions)]
+        {
+            self.unwrap()
+        }
+        #[cfg(not(debug_assertions))]
         match self {
-            Some(val) => val,
+            Some(v) => v,
             None => {
-                if cfg!(debug_assertions) {
-                    panic!("DebugCheckedPanic: None");
-                } else {
-                    println!("DebugCheckedPanic: None");
-                    Arch::hcf();
-                }
+                println!("debug_checked_unwrap failed");
+                unsafe { core::hint::unreachable_unchecked() }
             }
         }
     }
 
     #[inline]
-    fn debug_checked_expect(self, msg: impl fmt::Display) -> Self::Output {
+    fn debug_checked_expect(self, msg: &str) -> Self::Output {
+        #[cfg(debug_assertions)]
+        {
+            self.expect(msg)
+        }
+        #[cfg(not(debug_assertions))]
         match self {
-            Some(val) => val,
+            Some(v) => v,
             None => {
-                if cfg!(debug_assertions) {
-                    panic!("DebugCheckedPanic: {}: None", msg);
-                } else {
-                    println!("DebugCheckedPanic: {}: None", msg);
-                    Arch::hcf();
-                }
+                println!("debug_checked_expect failed: {msg}");
+                unsafe { core::hint::unreachable_unchecked() }
             }
         }
     }

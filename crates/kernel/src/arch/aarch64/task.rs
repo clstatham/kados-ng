@@ -1,9 +1,6 @@
 use core::mem::offset_of;
 
-use crate::{
-    cpu_local::CpuLocalBlock,
-    task::{context::Context, stack::Stack},
-};
+use crate::task::{context::Context, stack::Stack};
 
 use super::vectors::{InterruptFrame, enter_usermode};
 
@@ -59,11 +56,6 @@ impl ArchContext {
 ///
 /// This function will panic if there is no current CPU-local block.
 pub unsafe fn switch_to(prev: &mut Context, next: &mut Context) {
-    CpuLocalBlock::current()
-        .unwrap()
-        .next_addr_space
-        .set(next.addr_space.clone());
-
     unsafe {
         switch_to_inner(&mut prev.arch, &mut next.arch);
     }

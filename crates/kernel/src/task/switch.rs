@@ -20,12 +20,14 @@ use super::context::{CONTEXTS, Context, ContextRef, current};
 
 pub static SWITCH_LOCK: AtomicBool = AtomicBool::new(false);
 
-pub static EMPTY_CR3: Once<PhysAddr> = Once::new();
+pub static EMPTY_TABLE: Once<PhysAddr> = Once::new();
 
 #[inline]
 #[must_use]
-pub fn empty_cr3() -> PhysAddr {
-    *EMPTY_CR3.get().debug_checked_unwrap()
+pub fn empty_table() -> PhysAddr {
+    *EMPTY_TABLE
+        .get()
+        .debug_checked_expect("EMPTY_TABLE not initialized")
 }
 
 pub enum SwitchResult {
@@ -83,13 +85,11 @@ pub unsafe extern "C" fn switch_finish_hook() {
     SWITCH_LOCK.store(false, Ordering::SeqCst);
 
     unsafe {
-        switch_arch_hook();
+        switch_arch_hook(current);
     }
 }
 
-pub unsafe extern "C" fn switch_arch_hook() {
-    let block = CpuLocalBlock::current().unwrap_or_else(|| unreachable!());
-
+pub unsafe extern "C" fn switch_arch_hook(block: &'static CpuLocalBlock) {
     let current_addr_space = block.current_addr_space.borrow();
     let next_addr_space = block.next_addr_space.take();
 
@@ -114,25 +114,13 @@ pub unsafe extern "C" fn switch_arch_hook() {
     }
 }
 
-fn is_runnable(cx: &mut Context) -> bool {
-    if cx.running {
-        return false;
-    }
-
-    if cx.status == Status::Waiting {
-        cx.status = Status::Runnable;
-    }
-
-    matches!(cx.status, Status::Runnable)
-}
-
 /// Switches to the next runnable task.
 ///
 /// # Panics
 ///
 /// This function will panic if the CPU local block is not initialized.
 pub fn switch() -> SwitchResult {
-    let block = CpuLocalBlock::current().unwrap();
+    let block = CpuLocalBlock::current().expect("No current CPU local block");
 
     while SWITCH_LOCK
         .compare_exchange(false, true, Ordering::SeqCst, Ordering::Relaxed)
@@ -173,12 +161,16 @@ pub fn switch() -> SwitchResult {
             }
 
             let mut next_guard = next_lock.write_arc();
-            if is_runnable(&mut next_guard) {
+            if !next_guard.running
+                && matches!(next_guard.status, Status::Runnable | Status::Waiting)
+            {
+                next_guard.status = Status::Runnable;
                 switch_state_opt = Some((prev_guard, next_guard));
                 break;
             }
         }
     }
+
     if let Some((mut prev_guard, mut next_guard)) = switch_state_opt {
         let mut prev_cx = &mut *prev_guard;
         let mut next_cx = &mut *next_guard;
@@ -190,15 +182,22 @@ pub fn switch() -> SwitchResult {
             .switch_state
             .set_current_context(ArcRwSpinlockWriteGuard::rwlock(&next_guard).clone());
 
+        // FIXME: unsafe lifetime extension
+        // FIXME: is the commented-out version more readable?
+        #[allow(clippy::deref_addrof)]
         unsafe {
-            prev_cx = core::mem::transmute::<&'_ mut Context, &'_ mut Context>(&mut *prev_guard);
-            next_cx = core::mem::transmute::<&'_ mut Context, &'_ mut Context>(&mut *next_guard);
+            // prev_cx = core::mem::transmute::<&'_ mut Context, &'_ mut Context>(&mut *prev_guard);
+            // next_cx = core::mem::transmute::<&'_ mut Context, &'_ mut Context>(&mut *next_guard);
+            prev_cx = &mut *&raw mut *prev_guard;
+            next_cx = &mut *&raw mut *next_guard;
         }
 
         block.switch_state.result.set(Some(SwitchResultGuard {
             _prev: prev_guard,
             _next: next_guard,
         }));
+
+        block.next_addr_space.set(next_cx.addr_space.clone());
 
         unsafe {
             switch_to(prev_cx, next_cx);

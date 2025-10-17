@@ -10,7 +10,7 @@ use crate::{
     mem::paging::allocator::KernelFrameAllocator, syscall::errno::Errno,
 };
 
-use super::{addr_space::AddrSpaceLock, stack::Stack, switch::EMPTY_CR3};
+use super::{addr_space::AddrSpaceLock, stack::Stack, switch::EMPTY_TABLE};
 
 pub static CONTEXTS: RwLock<BTreeSet<ContextRef>> = RwLock::new(BTreeSet::new());
 
@@ -22,7 +22,7 @@ pub static CONTEXTS: RwLock<BTreeSet<ContextRef>> = RwLock::new(BTreeSet::new())
 pub fn init() {
     let mut cx = Context::new().expect("Failed to create kernel_main context");
 
-    EMPTY_CR3.call_once(|| unsafe { KernelFrameAllocator.allocate_one().unwrap() });
+    EMPTY_TABLE.call_once(|| unsafe { KernelFrameAllocator.allocate_one().unwrap() });
 
     cx.status = Status::Runnable;
     cx.running = true;

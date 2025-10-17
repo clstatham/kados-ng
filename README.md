@@ -27,7 +27,18 @@ There are many more utilities available via the build tool, run `cargo builder -
 
 ## Running on a real Raspberry Pi 4B
 
-TODO: document this
+*Note: This is currently only supported when building on Linux.*
+
+1. Take the SD card out of your RPi, put it in an adapter, and connect the adapter to your PC.
+2. Run `cargo builder flash --release --device /dev/sdX` in your terminal, where `/dev/sdX` is the device path of your SD card.
+3. Put the SD card back in your RPi and power it on.
+
+> [!WARNING]
+> Replace `/dev/sdX` with the actual device path of your SD card. Be very careful to choose the
+> correct device, as this command will overwrite the contents of the specified device.
+
+> [!NOTE]
+> This command will use `sudo` to request root access for mounting the device.
 
 ## Chainloading over USB UART serial port
 
